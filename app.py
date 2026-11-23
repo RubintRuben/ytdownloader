@@ -22,6 +22,7 @@ import sys
 import json
 import base64
 import shutil
+import socket
 import asyncio
 import tempfile
 import threading
@@ -1778,21 +1779,6 @@ app.mount("/", NoCacheStaticFiles(directory=str(STATIC_DIR), html=True), name="s
 # Indítás: szerver háttérszálon + natív ablak (pywebview / WebView2)
 # ----------------------------------------------------------------------------
 
-def _find_free_port(preferred: int = 7860) -> int:
-    """Szabad port keresése (ha a 7860 foglalt, kérünk egy szabadot)."""
-    import socket
-    for p in (preferred, 0):
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.bind(("127.0.0.1", p))
-            port = s.getsockname()[1]
-            s.close()
-            return port
-        except OSError:
-            continue
-    return preferred
-
-
 def _log(msg: str) -> None:
     try:
         import time
@@ -2113,40 +2099,58 @@ def _setup_html() -> str:
 </html>"""
 
 
-def _run_server(port: int):
+def _run_server(server, listener: socket.socket) -> None:
     try:
-        import uvicorn
-        _log(f"starting server on 127.0.0.1:{port}")
-        # csak a saját gépről elérhető (127.0.0.1) — biztonságos, nem nyílik a hálózatra
-        uvicorn.run(
-            app,
-            host="127.0.0.1",
-            port=port,
-            log_level="warning",
-            access_log=False,
-            loop="asyncio",
-            http="h11",
-            log_config=None,
-        )
-    except Exception as e:  # noqa: BLE001
+        with listener:
+            server.run(sockets=[listener])
+    except (Exception, SystemExit):
         import traceback
-        _log(f"server crashed: {e}\n{traceback.format_exc()}")
+        _log(f"Local server stopped: {traceback.format_exc()}")
 
 
-def _wait_until_up(url: str, timeout: float = 15.0) -> bool:
-    """Megvárja, amíg a szerver válaszol (a natív ablak előtt)."""
-    import time
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            r = httpx.get(url, timeout=0.7)
-            if r.status_code < 500 and "text/html" in r.headers.get("content-type", ""):
-                _log(f"server ready: {url}")
-                return True
-        except Exception:
-            time.sleep(0.1)
+def _wait_until_up(url: str, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    with httpx.Client(timeout=0.7, trust_env=False) as client:
+        while time.monotonic() < deadline:
+            try:
+                response = client.get(url)
+                if response.status_code == 200 and "text/html" in response.headers.get("content-type", ""):
+                    _log(f"server ready: {url}")
+                    return True
+            except httpx.HTTPError:
+                pass
+            time.sleep(0.12)
     _log(f"server readiness timeout: {url}")
     return False
+
+
+def _start_local_server(preferred: int) -> str | None:
+    """Keep the port bound from selection through Uvicorn startup."""
+    import uvicorn
+
+    for candidate in dict.fromkeys((preferred, 0)):
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            if os.name == "nt":
+                listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            listener.bind(("127.0.0.1", candidate))
+            listener.listen(socket.SOMAXCONN)
+        except OSError as exc:
+            _log(f"Local port {candidate} could not be reserved: {exc}")
+            listener.close()
+            continue
+
+        port = listener.getsockname()[1]
+        url = f"http://127.0.0.1:{port}"
+        _log(f"starting server on {url}")
+        config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning",
+                                access_log=False, loop="asyncio", http="h11", log_config=None)
+        server = uvicorn.Server(config)
+        threading.Thread(target=_run_server, args=(server, listener), daemon=True).start()
+        if _wait_until_up(url, timeout=12.0 if candidate else 16.0):
+            return url
+        server.should_exit = True
+    return None
 
 
 def _app_icon_path() -> str | None:
@@ -2160,10 +2164,8 @@ def _app_icon_path() -> str | None:
 
 
 def _open_main_app_in_window(window) -> bool:
-    port = _find_free_port(int(os.environ.get("PORT", "7860")))
-    url = f"http://127.0.0.1:{port}"
-    threading.Thread(target=_run_server, args=(port,), daemon=True).start()
-    if not _wait_until_up(url, timeout=30.0):
+    url = _start_local_server(int(os.environ.get("PORT", "7860")))
+    if not url:
         return False
     try:
         if hasattr(window, "resize"):
@@ -2438,12 +2440,8 @@ def main():
             _show_error("Downloader", f"Nem sikerult elinditani a setup ablakot.\n\nNaplo: {LOG_FILE}")
             return
 
-    port = _find_free_port(int(os.environ.get("PORT", "7860")))
-    url = f"http://127.0.0.1:{port}"
-
-    # a szervert háttérszálon futtatjuk; a fő szál viszi a natív ablakot
-    threading.Thread(target=_run_server, args=(port,), daemon=True).start()
-    if not _wait_until_up(url, timeout=30.0):
+    url = _start_local_server(int(os.environ.get("PORT", "7860")))
+    if not url:
         _show_error(
             "Downloader",
             f"Nem sikerult elinditani a helyi szervert.\n\nNaplo: {LOG_FILE}",
@@ -2491,7 +2489,10 @@ if __name__ == "__main__":
         with YoutubeDL(_base_opts()) as downloader:
             if (not downloader._impersonate_target_available(ImpersonateTarget())
                     or "node" not in downloader.params["js_runtimes"]
-                    or not (STATIC_DIR / "settings.js").is_file()):
+                    or not (STATIC_DIR / "settings.js").is_file()
+                    or not (STATIC_DIR / "hero-media.webp").is_file()):
                 raise SystemExit(1)
+        if not _start_local_server(0):
+            raise SystemExit(1)
     else:
         main()

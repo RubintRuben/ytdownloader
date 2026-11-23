@@ -16,6 +16,34 @@ class DownloadTests(unittest.TestCase):
         trimmed = app._build_opts('test', 'https://youtube.com/watch?v=x', Path('.'), 'mp4', '720', 10, 30, 60)
         self.assertIn('download_ranges', trimmed)
 
+    def test_local_server_uses_another_port_if_the_preferred_port_is_busy(self):
+        import socket
+        import httpx
+        import uvicorn
+
+        servers = []
+        real_server = uvicorn.Server
+
+        def track_server(config):
+            server = real_server(config)
+            servers.append(server)
+            return server
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as occupied:
+            occupied.bind(("127.0.0.1", 0))
+            occupied.listen()
+            preferred = occupied.getsockname()[1]
+            try:
+                with patch.object(uvicorn, "Server", side_effect=track_server):
+                    url = app._start_local_server(preferred)
+                self.assertIsNotNone(url)
+                self.assertNotEqual(url, f"http://127.0.0.1:{preferred}")
+                response = httpx.get(url + "/api/version", timeout=2, trust_env=False)
+                self.assertEqual(response.json(), {"version": app.APP_VERSION})
+            finally:
+                for server in servers:
+                    server.should_exit = True
+
     def test_expired_metadata_is_refreshed(self):
         app._info_cache['https://example.org/video|'] = (app.time.monotonic() - 601, {'title': 'old'})
         with patch.object(app, '_extract_info_once', return_value={'title':'fresh'}) as extract:
