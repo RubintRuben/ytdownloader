@@ -2489,8 +2489,7 @@ if __name__ == "__main__":
         with YoutubeDL(_base_opts()) as downloader:
             if (not downloader._impersonate_target_available(ImpersonateTarget())
                     or "node" not in downloader.params["js_runtimes"]
-                    or not (STATIC_DIR / "settings.js").is_file()
-                    or not (STATIC_DIR / "hero-media.webp").is_file()):
+                    or not (STATIC_DIR / "settings.js").is_file()):
                 raise SystemExit(1)
         if not _start_local_server(0):
             raise SystemExit(1)

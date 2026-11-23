@@ -579,56 +579,50 @@ body {
 
 .tl-window {
   position: absolute; top: -2px; bottom: -2px;
-  border: 2px solid var(--accent); border-radius: 6px;
+  border: 0; border-radius: 6px;
   pointer-events: none;
-  box-shadow: 0 0 0 1px rgba(0,0,0,0.4), 0 4px 16px color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 .tl-handle {
-  position: absolute; top: -2px; bottom: -2px; width: 18px;
-  background: var(--accent);
-  cursor: ew-resize;
-  pointer-events: auto;
+  position: absolute; inset-block: 0; width: 16px;
+  background: var(--accent); border-radius: 4px;
+  cursor: ew-resize; pointer-events: auto;
   display: flex; align-items: center; justify-content: center;
   transition: background 0.15s;
 }
 .tl-handle:hover { background: var(--accent-2); }
-.tl-handle span { width: 3px; height: 30px; background: rgba(255,255,255,0.95); border-radius: 2px; }
-.tl-handle-l { left: -2px; border-radius: 6px 0 0 6px; }
-.tl-handle-r { right: -2px; border-radius: 0 6px 6px 0; }
+.tl-handle span { width: 3px; height: 24px; background: var(--on-accent); border-radius: 2px; }
+.tl-handle-l { left: 0; transform: translateX(-50%); }
+.tl-handle-r { right: 0; transform: translateX(50%); }
+.tl-window.handles-close .tl-handle-l { transform: translateX(-92%); }
+.tl-window.handles-close .tl-handle-r { transform: translateX(92%); }
 
 .tl-bubble, .ph-bubble {
-  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
-  background: var(--accent); color: #fff;
-  font-size: 0.74rem; font-weight: 700; font-variant-numeric: tabular-nums;
-  padding: 3px 8px; border-radius: 7px; white-space: nowrap;
-  pointer-events: none; opacity: 0; transition: opacity 0.15s;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  position: absolute; left: 50%; transform: translateX(-50%);
+  font-size: 11px; line-height: 17px; font-weight: 720; font-variant-numeric: tabular-nums;
+  padding: 2px 7px; border-radius: 6px; white-space: nowrap; pointer-events: none;
 }
-.tl-bubble::after, .ph-bubble::after {
-  content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
-  border: 5px solid transparent; border-top-color: var(--accent);
+.tl-bubble {
+  bottom: calc(100% + 6px);
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 2px 8px #08031344;
 }
-.tl-handle:hover .tl-bubble, .tl-window:active .tl-bubble { opacity: 1; }
-.ph-bubble { background: #fff; color: #111; }
-.ph-bubble::after { border-top-color: #fff; }
-
+.tl-bubble::after {
+  content: ""; position: absolute; top: 100%; left: var(--pointer-x, 50%); transform: translateX(-50%);
+  border: 4px solid transparent; border-top-color: var(--accent);
+}
 .playhead {
-  position: absolute; top: -2px; bottom: -2px; width: 2px;
-  background: #fff; box-shadow: 0 0 10px rgba(255,255,255,0.9);
-  left: 0; z-index: 6;
-  cursor: ew-resize;
-  transition: left 0.08s linear;
+  position: absolute; inset-block: -2px; width: 2px;
+  background: #fff; box-shadow: 0 0 0 1px #181526, 0 0 8px #ffffff80;
+  left: 0; z-index: 3; transform: translateX(-50%); pointer-events: none;
 }
-.playhead.scrub { transition: none; }
 .playhead::before {
-  content: ""; position: absolute; top: -6px; left: 50%; transform: translateX(-50%);
-  width: 14px; height: 14px; background: #fff; border-radius: 50%;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+  content: ""; position: absolute; top: -4px; left: 50%; transform: translateX(-50%);
+  width: 9px; height: 9px; background: #fff; border: 1px solid #181526; border-radius: 50%;
 }
+.ph-bubble { top: calc(100% + 6px); background: #fff; color: #111; opacity: 0; }
 .playhead.scrub .ph-bubble { opacity: 1; }
-.playhead::after {
-  content: ""; position: absolute; top: 0; bottom: 0; left: -7px; width: 16px;
-}
 
 /* a timeline elrejtve, ha nincs vágható (pl. kép/instagram fotó) */
 .editor.no-timeline .ed-timeline { display: none; }

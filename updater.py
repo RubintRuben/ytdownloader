@@ -126,7 +126,7 @@ def _launch_installer(staged: Path, digest: str, log_file: Path) -> None:
     arguments = [str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
                  "-ExecutionPolicy", "Bypass", "-File", str(helper), "-Target", str(executable),
                  "-Staged", str(staged), "-Digest", digest, "-AppPid", str(os.getpid()),
-                 "-LogPath", str(log_file)]
+                 "-LauncherPid", str(os.getppid()), "-LogPath", str(log_file)]
     # A PyInstaller child normally inherits the app's DLL search directory.
     # Start the OS helper with its normal Windows DLL search order.
     set_dll_directory = ctypes.windll.kernel32.SetDllDirectoryW
@@ -260,7 +260,7 @@ class DesktopUpdater:
 
 
 _INSTALL_SCRIPT = r"""
-param([string]$Target, [string]$Staged, [string]$Digest, [int]$AppPid, [string]$LogPath)
+param([string]$Target, [string]$Staged, [string]$Digest, [int]$AppPid, [int]$LauncherPid, [string]$LogPath)
 $ErrorActionPreference = 'Stop'
 $backup = "$Staged.previous"
 $replaced = $false
@@ -272,8 +272,8 @@ function Start-Downloader {
     $start.EnvironmentVariables['PYINSTALLER_RESET_ENVIRONMENT'] = '1'
     [void][Diagnostics.Process]::Start($start)
 }
-function Get-Application {
-    try { [Diagnostics.Process]::GetProcessById($AppPid) }
+function Get-Application([int]$ProcessId = $AppPid) {
+    try { [Diagnostics.Process]::GetProcessById($ProcessId) }
     catch [ArgumentException] { $null }
 }
 try {
@@ -291,6 +291,11 @@ try {
     $application = Get-Application
     if ($application -and -not $application.WaitForExit(90000)) {
         throw 'Downloader did not exit before the update timeout.'
+    }
+    $launcher = Get-Application $LauncherPid
+    $name = [IO.Path]::GetFileNameWithoutExtension($Target)
+    if ($launcher -and $launcher.ProcessName -eq $name -and -not $launcher.WaitForExit(20000)) {
+        throw 'The original launcher kept the executable open.'
     }
     for ($attempt = 0; $attempt -lt 80; $attempt++) {
         try {

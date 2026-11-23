@@ -155,9 +155,6 @@
     <main id="landing" class="landing">
       <div class="workspace">
         <section class="hero" aria-labelledby="heroTitle">
-          <div class="hero-art" aria-hidden="true">
-            <img src="hero-media.webp" alt="" width="720" height="720" fetchpriority="high">
-          </div>
           <div class="hero-content">
             <h1 class="hero-title" id="heroTitle">Videók letöltése</h1>
             <p class="hero-sub" id="heroSub"></p>
@@ -264,12 +261,14 @@
               <div class="tl-window" id="tlWindow">
                 <div class="tl-handle tl-handle-l" id="handleL" role="slider" tabindex="0" aria-label="Vágás kezdete" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
                   <span></span>
-                  <div class="tl-bubble" id="bubbleL">0:00</div>
                 </div>
                 <div class="tl-handle tl-handle-r" id="handleR" role="slider" tabindex="0" aria-label="Vágás vége" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
                   <span></span>
-                  <div class="tl-bubble" id="bubbleR">0:00</div>
                 </div>
+              </div>
+              <div class="trim-timestamps" aria-hidden="true">
+                <span class="tl-bubble tl-bubble-start" id="bubbleL">0:00,00</span>
+                <span class="tl-bubble tl-bubble-end" id="bubbleR">0:00,00</span>
               </div>
               <div class="playhead" id="playhead">
                 <div class="ph-bubble" id="phBubble">0:00</div>

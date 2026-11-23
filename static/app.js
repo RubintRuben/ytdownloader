@@ -124,7 +124,6 @@ let searchToken = 0;           // minden új keresés/tab-váltás növeli; az e
 let duration = 0;
 let selStart = 0;
 let selEnd = 0;
-let loopSelection = false;
 let previewGeneration = 0;
 let previewController = null;
 let retryPreview = null;
@@ -135,8 +134,8 @@ let pendingSelection = null;
 let pendingPreviewSeek = null;
 const MP3_BITRATES = [320, 256, 192, 128, 96];
 
-// előnézet-lejátszó: a <video> (igVideo) állását figyelő időzítő
-let pollTimer = null;
+let previewFrame = null;
+let clipEndTimer = null;
 
 // --- segédek ---------------------------------------------------------------
 
@@ -145,6 +144,10 @@ function fmtTime(sec) {
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
   const p = (n) => String(n).padStart(2, "0");
   return h > 0 ? `${h}:${p(m)}:${p(s)}` : `${m}:${p(s)}`;
+}
+function fmtTrimTime(seconds) {
+  const ticks = Math.round(Math.max(0, seconds) * 100);
+  return fmtTime(Math.floor(ticks / 100)) + "," + String(ticks % 100).padStart(2, "0");
 }
 function fmtSize(b) {
   if (!b || b < 0) return "—";
@@ -229,7 +232,6 @@ function setTab(tab) {
   const wasInEditor = !editor.hidden;
   if (wasInEditor) {
     stopPreview();
-    clearInterval(pollTimer);
     showView("landing");
   }
 
@@ -617,7 +619,9 @@ function stopPreview() {
   previewController = null;
   previewWantPlay = false;
   seekPreview = null;
-  clearInterval(pollTimer);
+  pendingPreviewSeek = null;
+  cancelAnimationFrame(previewFrame);
+  clearTimeout(clipEndTimer);
   releaseFrameSampler();
   for (const name of ["onloadedmetadata", "ondurationchange", "onloadeddata", "onerror", "onwaiting", "onplaying", "oncanplay"]) {
     igVideo[name] = null;
@@ -756,10 +760,7 @@ function setupDirectPlayer(refresh = false) {
       framesStarted = true;
       buildPreviewFilmstrip(igVideo.currentSrc, generation);
     }
-    if (previewWantPlay) {
-      previewWantPlay = false;
-      igVideo.play().catch(() => { if (active()) setNotice("Az előnézet kész. Indítsd a lejátszás gombbal."); });
-    }
+    if (previewWantPlay) playSelectedRange();
   };
   igVideo.onwaiting = () => {
     if (!active() || igVideo.paused) return;
@@ -770,6 +771,7 @@ function setupDirectPlayer(refresh = false) {
     if (!active()) return;
     clearTimeout(mediaTimer);
     setNotice(hasAudio ? "" : "A forrásvideó nem tartalmaz hangsávot.");
+    if (previewWantPlay && igVideo.paused) playSelectedRange();
   };
 
   async function prepareFile() {
@@ -828,7 +830,7 @@ function setupDirectPlayer(refresh = false) {
   }
 
   start();
-  startPlayhead();
+  renderPlayhead(0);
 }
 
 $("previewRetry").addEventListener("click", () => retryPreview?.());
@@ -889,7 +891,6 @@ async function buildPreviewFilmstrip(source, generation) {
 
 backBtn.addEventListener("click", () => {
   stopPreview();
-  clearInterval(pollTimer);
   showView("landing");
   urlInput.focus();
 });
@@ -899,40 +900,91 @@ function setPlayIcon(playing) {
   playBtn.setAttribute("aria-label", playing ? "Szünet" : "Lejátszás");
 }
 
-// A playhead/idő a <video> elem állásából frissül (egységes minden forrásnál).
-function startPlayhead() {
-  clearInterval(pollTimer);
-  pollTimer = setInterval(() => {
-    if (igVideo.hidden || igVideo.readyState < 2 || pendingPreviewSeek !== null) return;
-    if (drag && drag.kind === "seek") return;
-    const t = igVideo.currentTime || 0;
-    curTimeEl.textContent = fmtTime(t);
-    if (duration > 0) playhead.style.left = (t / duration) * 100 + "%";
-    if (phBubble) phBubble.textContent = fmtTime(t);
-    setPlayIcon(!igVideo.paused && !igVideo.ended);
-    // a kijelölt szakasz végén megállunk (lejátszás-előnézet a vágáshoz)
-    if (loopSelection && !igVideo.paused && t >= selEnd - 0.1) {
-      try { igVideo.pause(); } catch {}
-      loopSelection = false;
-    }
-  }, 100);
+function renderPlayhead(time) {
+  if (duration > 0) playhead.style.left = Math.max(0, Math.min(100, time / duration * 100)) + "%";
+  curTimeEl.textContent = fmtTrimTime(time);
+  if (phBubble) phBubble.textContent = fmtTrimTime(time);
 }
+
+function pauseSelectedRange() {
+  previewWantPlay = false;
+  igVideo.pause();
+  setPlayIcon(false);
+}
+
+function playSelectedRange() {
+  if (!info || info.isLive) return;
+  if (igVideo.hidden || igVideo.readyState < 2 || igVideo.seeking || pendingPreviewSeek !== null) {
+    previewWantPlay = true;
+    return;
+  }
+  if (duration > 0 && (igVideo.currentTime < selStart - 0.025 || igVideo.currentTime >= selEnd - 0.015)) {
+    previewWantPlay = true;
+    if (!seekTo(selStart, true) || igVideo.seeking) return;
+  }
+
+  previewWantPlay = false;
+  const generation = previewGeneration;
+  igVideo.play().catch(error => {
+    if (generation !== previewGeneration || error.name === "AbortError") return;
+    $("previewNotice").textContent = "Az előnézet nem indult el. Próbáld újra a lejátszást.";
+    setPlayIcon(false);
+  });
+}
+
+function checkPlaybackPosition() {
+  if (igVideo.hidden || igVideo.readyState < 1 || pendingPreviewSeek !== null) return;
+  let time = igVideo.currentTime;
+  if (!igVideo.paused && duration > 0 && time >= selEnd - 0.012) {
+    pauseSelectedRange();
+    time = selEnd;
+    igVideo.currentTime = Math.min(selEnd, igVideo.duration);
+  }
+  if (drag?.kind !== "seek") renderPlayhead(time);
+}
+
+function followPlaybackFrame() {
+  checkPlaybackPosition();
+  if (!igVideo.paused && !igVideo.ended) previewFrame = requestAnimationFrame(followPlaybackFrame);
+}
+
+function trackClipEnd() {
+  clearTimeout(clipEndTimer);
+  if (igVideo.paused || igVideo.ended || !(duration > 0)) return;
+  const delay = Math.max(16, 1000 * (selEnd - igVideo.currentTime) / igVideo.playbackRate);
+  clipEndTimer = setTimeout(() => {
+    checkPlaybackPosition();
+    trackClipEnd();
+  }, delay);
+}
+
+for (const event of ["play", "pause", "ended", "ratechange"]) {
+  igVideo.addEventListener(event, () => {
+    cancelAnimationFrame(previewFrame);
+    followPlaybackFrame();
+    trackClipEnd();
+    setPlayIcon(!igVideo.paused && !igVideo.ended);
+  });
+}
+igVideo.addEventListener("seeked", () => {
+  checkPlaybackPosition();
+  trackClipEnd();
+  if (previewWantPlay) playSelectedRange();
+});
+igVideo.addEventListener("timeupdate", () => {
+  if (document.hidden || igVideo.paused) checkPlaybackPosition();
+});
 
 playBtn.addEventListener("click", () => {
   if (info?.isLive) return;
-  if (igVideo.hidden) { previewWantPlay = true; return; }
+  if (previewWantPlay || !igVideo.paused) {
+    pauseSelectedRange();
+    return;
+  }
   if (igVideo.error) { retryPreview?.(); return; }
-  if (igVideo.readyState < 2) { previewWantPlay = true; $("previewNotice").textContent = "Előkészítés után indul a lejátszás…"; return; }
-  if (igVideo.paused || igVideo.ended) {
-    // ha a playhead a kijelölésen kívül van, a kijelölés elejéről indítjuk
-    if (duration > 0 && (igVideo.currentTime < selStart - 0.2 || igVideo.currentTime >= selEnd - 0.05)) {
-      seekTo(selStart);
-    }
-    igVideo.play().catch(() => { $("previewNotice").textContent = "Az előnézet nem indult el. Próbáld újra a lejátszást."; setPlayIcon(false); });
-    setPlayIcon(true);
-  } else {
-    try { igVideo.pause(); } catch {}
-    setPlayIcon(false);
+  playSelectedRange();
+  if (previewWantPlay && (igVideo.hidden || igVideo.readyState < 2)) {
+    $("previewNotice").textContent = "Előkészítés után indul a lejátszás…";
   }
 });
 
@@ -1033,14 +1085,25 @@ function layoutWindow() {
   const left = (selStart / (duration || 1)) * w;
   const right = (selEnd / (duration || 1)) * w;
   tlWindow.style.left = left + "px";
-  tlWindow.style.width = Math.max(8, right - left) + "px";
+  tlWindow.style.width = (right - left) + "px";
+  tlWindow.classList.toggle("handles-close", right - left < 16);
   dimLeft.style.width = left + "px";
   dimRight.style.width = (w - right) + "px";
-  startTimeEl.textContent = fmtTime(selStart);
-  endTimeEl.textContent = fmtTime(selEnd);
-  selectedLenEl.textContent = fmtTime(selEnd - selStart);
-  if (bubbleL) bubbleL.textContent = fmtTime(selStart);
-  if (bubbleR) bubbleR.textContent = fmtTime(selEnd);
+  bubbleL.textContent = startTimeEl.textContent = fmtTrimTime(selStart);
+  bubbleR.textContent = endTimeEl.textContent = fmtTrimTime(selEnd);
+  selectedLenEl.textContent = fmtTrimTime(selEnd - selStart);
+
+  const startLabel = placeTrimLabel(bubbleL, left, w);
+  const endLabel = placeTrimLabel(bubbleR, right, w);
+  timeline.classList.toggle("labels-stacked", startLabel.right + 5 > endLabel.left);
+}
+
+function placeTrimLabel(label, point, width) {
+  const half = label.offsetWidth / 2;
+  const center = Math.max(half, Math.min(width - half, point));
+  label.style.left = center + "px";
+  label.style.setProperty("--pointer-x", Math.max(4, Math.min(2 * half - 4, half + point - center)) + "px");
+  return {left: center - half, right: center + half};
 }
 
 let drag = null;
@@ -1054,21 +1117,24 @@ function secAt(px) {
   return Math.max(0, Math.min(duration, frac * duration));
 }
 
-function seekTo(t) {
-  if (igVideo.readyState < 1) pendingPreviewSeek = t;
-  if (duration > 0) playhead.style.left = (t / duration) * 100 + "%";
-  curTimeEl.textContent = fmtTime(t);
-  if (phBubble) phBubble.textContent = fmtTime(t);
-  if (seekPreview?.(t)) return;
-  if (!igVideo.hidden && Math.abs(t - lastSeekT) > 0.03) {
-    try { igVideo.currentTime = t; } catch {}
-    lastSeekT = t;
+function seekTo(time, force = false) {
+  renderPlayhead(time);
+  if (seekPreview?.(time) || igVideo.hidden || igVideo.readyState < 1) {
+    pendingPreviewSeek = time;
+    return false;
   }
+  pendingPreviewSeek = null;
+  if (force || Math.abs(time - lastSeekT) > 0.03 || Math.abs(time - igVideo.currentTime) > 0.03) {
+    igVideo.currentTime = time;
+    lastSeekT = time;
+  }
+  return true;
 }
 
 function startDrag(kind, ev) {
   if (!(duration > 0)) return;
   ev.preventDefault();
+  pauseSelectedRange();
   if (kind === "l") handleL.focus({ preventScroll: true });
   if (kind === "r") handleR.focus({ preventScroll: true });
   drag = { kind, x0: clientX(ev), s0: selStart, e0: selEnd };
@@ -1117,6 +1183,7 @@ for (const [handle, side] of [[handleL, "l"], [handleR, "r"]]) {
   handle.addEventListener("keydown", e => {
     if (!(duration > 0) || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
     e.preventDefault();
+    pauseSelectedRange();
     const gap = Math.min(0.1, duration);
     let value = (side === "l" ? selStart : selEnd) + (e.key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 1 : 0.1);
     if (e.key === "Home") value = 0;
@@ -1133,8 +1200,6 @@ function timelineDown(e) {
 }
 timeline.addEventListener("mousedown", timelineDown);
 timeline.addEventListener("touchstart", timelineDown, { passive: false });
-playhead.addEventListener("mousedown", (e) => { e.stopPropagation(); startDrag("seek", e); });
-playhead.addEventListener("touchstart", (e) => { e.stopPropagation(); startDrag("seek", e); }, { passive: false });
 
 function scrubbing(on) {
   playhead.classList.toggle("scrub", on);

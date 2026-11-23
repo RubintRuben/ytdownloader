@@ -26,3 +26,36 @@ function fixture(values={}) {
   c.updateTimelineDuration(.4);assert.equal(c.selEnd,.4);
 }
 console.log('PASS: missing duration, preserved cuts, saved cuts, short clips and non-finite durations');
+
+const format = source.slice(source.indexOf('function fmtTime('), source.indexOf('function fmtSize('));
+const playback = source.slice(source.indexOf('function renderPlayhead('), source.indexOf('function followPlaybackFrame('));
+{
+  const video = {currentTime: 0, duration: 12, readyState: 4, seeking: false, paused: true};
+  const context = {
+    igVideo: video, info: {}, duration: 12, selStart: 3.4, selEnd: 5.5, previewWantPlay: false,
+    previewGeneration: 1, pendingPreviewSeek: null, drag: null,
+    playhead: {style: {}}, curTimeEl: {}, phBubble: {}, setPlayIcon() {},
+    seekTo(time) { video.currentTime = time; video.seeking = true; return true; },
+  };
+  video.play = async () => { video.paused = false; };
+  video.pause = () => { video.paused = true; };
+  vm.createContext(context);
+  vm.runInContext(format + playback, context);
+  assert.equal(context.fmtTrimTime(3.4), '0:03,40');
+  assert.equal(context.fmtTrimTime(59.999), '1:00,00');
+
+  context.playSelectedRange();
+  assert.equal(video.currentTime, 3.4);
+  assert.equal(video.paused, true);
+  assert.equal(context.previewWantPlay, true);
+  video.seeking = false;
+  context.playSelectedRange();
+  assert.equal(video.paused, false);
+  assert.equal(context.previewWantPlay, false);
+
+  video.currentTime = 5.499;
+  context.checkPlaybackPosition();
+  assert.equal(video.currentTime, 5.5);
+  assert.equal(video.paused, true);
+}
+console.log('PASS: trim labels round correctly and playback stays within the selection');
