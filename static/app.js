@@ -78,6 +78,16 @@ const stage = $("stage");
 const igVideo = $("igVideo");
 const titleEl = $("title");
 const uploaderEl = $("uploader");
+const channelProfile = $("channelProfile");
+const sourceNames = {youtube: "YouTube", tiktok: "TikTok", instagram: "Instagram"};
+const sourceImages = {youtube: "youtube.jpg", tiktok: "tiktok.png", instagram: "instagram.jpg"};
+let channelReturnQuery = null;
+
+function sourceLogo(source) {
+  const filename = Object.hasOwn(sourceImages, source) ? sourceImages[source] : "";
+  return filename ? '<img src="brands/' + filename + '" alt="">' : "";
+}
+
 const formatToggle = $("formatToggle");
 const qualityLabel = $("qualityLabel");
 const qualitySelect = $("quality");
@@ -236,6 +246,8 @@ function setTab(tab) {
   }
 
   currentTab = tab;
+  hideChannelProfile();
+  channelReturnQuery = null;
   sourcePanel.hidden = tab !== "any";
   tabsEl.querySelectorAll(".tab").forEach((button) => {
     const selected = button.dataset.tab === tab;
@@ -288,6 +300,8 @@ searchForm.addEventListener("submit", (e) => {
 async function handleInput() {
   const raw = urlInput.value.trim();
   if (!raw) { showStatus("Illeszd be a linket vagy írj be egy keresőszót.", "error"); return; }
+  const channelRef = (currentTab === "youtube" || currentTab === "any") && youtubeChannelRef(raw);
+  if (channelRef) { openYtChannel(channelRef); return; }
 
   // Ha link → egyből editor.
   if (looksLikeUrl(raw)) {
@@ -326,6 +340,8 @@ const YT_SEARCH_FIRST = 18;
 let searchController = null;
 
 async function runSearch(query, source) {
+  hideChannelProfile();
+  channelReturnQuery = null;
   source = source || "youtube";
   const myToken = ++searchToken;   // ez a keresés azonosítója; ha közben tab-ot váltunk, elavul
   searchController?.abort();
@@ -335,6 +351,15 @@ async function runSearch(query, source) {
   setLoading(true);
   hideStatus();
   renderSkeletons(12);
+  const channelTask = fetch(API + "/api/search/channels?q=" + encodeURIComponent(query), { signal })
+    .then(response => response.ok ? response.json() : {channels: []})
+    .then(data => data.channels || [])
+    .catch(() => []);
+  const showChannels = channels => {
+    if (myToken !== searchToken) return;
+    ytChannelsRow.replaceChildren(...channels.map(makeChannelCard));
+    ytChannels.hidden = !channels.length;
+  };
   try {
     const res = await fetch(`${API}/api/search?q=` + encodeURIComponent(query) +
                             "&limit=" + YT_SEARCH_FIRST + "&source=youtube", { signal });
@@ -345,18 +370,13 @@ async function runSearch(query, source) {
     if (!res.ok) throw new Error(data.detail || "A keresés nem sikerült.");
     const items = data.results || [];
     if (!items.length) {
-      resultsEl.hidden = true;
-      showStatus("Nincs találat erre: " + query, "error");
+      const channels = await channelTask;
+      if (myToken !== searchToken) return;
+      resultsGrid.replaceChildren();
+      showChannels(channels);
+      resultsEl.hidden = !channels.length;
+      if (!channels.length) showStatus("Nincs találat erre: " + query, "error");
       return;
-    }
-    // YouTube: előbb a csatorna-sor (kerek profilképek), alatta a videó-találatok
-    const channels = data.channels || [];
-    ytChannelsRow.innerHTML = "";
-    if (channels.length) {
-      channels.forEach((c, i) => ytChannelsRow.appendChild(makeChannelCard(c, i)));
-      ytChannels.hidden = false;
-    } else {
-      ytChannels.hidden = true;
     }
     // YouTube videó-találatok + végtelen görgetés indítása
     ytSearchState = { query, shown: items.length, loading: false, done: items.length < YT_SEARCH_FIRST };
@@ -365,13 +385,7 @@ async function runSearch(query, source) {
     resultsGrid.innerHTML = "";
     items.forEach((it, i) => resultsGrid.appendChild(makeVideoCard(it, i)));
     resultsEl.hidden = false;
-    fetch(`${API}/api/search/channels?q=${encodeURIComponent(query)}`, { signal })
-      .then(r => r.ok ? r.json() : { channels: [] })
-      .then(data => {
-        if (myToken !== searchToken) return;
-        ytChannelsRow.replaceChildren(...(data.channels || []).map(makeChannelCard));
-        ytChannels.hidden = !data.channels?.length;
-      }).catch(() => {});
+    channelTask.then(showChannels);
   } catch (e) {
     if (myToken !== searchToken) return;   // elavult keresés hibája — némán elnyeljük
     console.error("[Downloader] keresés hiba:", e);
@@ -410,13 +424,10 @@ function makeVideoCard(it, i, igStyle) {
 
 // (Az IG ember-kereső kártyák megszűntek — az Instagram fülön már csak link-beillesztés van.)
 
-// követőszám rövid formázása (504000000 → "504M")
-function fmtFollowers(n) {
-  n = Number(n) || 0;
-  if (n >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, "") + "Mrd";
-  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
-  if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "E";
-  return String(n);
+const channelCountFormat = new Intl.NumberFormat("hu-HU", { notation: "compact", maximumFractionDigits: 1 });
+
+function fmtFollowers(count) {
+  return channelCountFormat.format(count);
 }
 
 // --- csatorna-kártya (YouTube csatorna-keresés, kerek profilkép) ---
@@ -432,38 +443,100 @@ function makeChannelCard(c, i) {
     <div class="cc-pic"><span class="cc-initial">${initial}</span>${pic ? `<img src="${pic}" alt="" loading="lazy" onerror="this.style.display='none'">` : ""}</div>
     <div class="cc-name">${escapeHtml(c.title)}</div>
     ${subs}`;
-  card.addEventListener("click", () => openYtChannel(c.id, c.title));
+  card.addEventListener("click", () => openYtChannel(c.id, c.title, c));
   return card;
 }
 
-// egy YouTube csatorna videóinak betöltése (a csatorna-kártyára kattintva)
-async function openYtChannel(channelId, title) {
+function youtubeChannelRef(value) {
+  if (/^UC[A-Za-z0-9_-]{22}$/.test(value) || /^@[\p{L}\p{N}_.-]{2,100}$/u.test(value)) return value;
+  try {
+    const url = new URL(/^https?:\/\//i.test(value) ? value : "https://" + value);
+    const hosts = ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"];
+    if (!hosts.includes(url.hostname.toLowerCase())) return null;
+    if (!/^\/(?:@[^/]+|channel\/UC[A-Za-z0-9_-]{22}|(?:c|user)\/[^/]+)(?:\/[^/]+)?\/?$/.test(url.pathname)) return null;
+    return url.href;
+  } catch { return null; }
+}
+
+function hideChannelProfile() {
+  channelProfile.hidden = true;
+  landing.classList.remove("channel-mode");
+}
+
+function channelPicture(node, url) {
+  node.hidden = !url;
+  if (!url) { node.removeAttribute("src"); return; }
+  node.onerror = () => { node.hidden = true; };
+  node.src = API + "/api/thumb?url=" + encodeURIComponent(url.startsWith("//") ? "https:" + url : url);
+}
+
+function renderChannelProfile(channel) {
+  const title = channel.title || "YouTube-csatorna";
+  $("channelName").textContent = title;
+  $("channelInitial").textContent = title[0].toUpperCase();
+  $("channelVerified").hidden = !channel.verified;
+  const details = [channel.handle];
+  if (typeof channel.followers === "number") details.push(fmtFollowers(channel.followers) + " feliratkozó");
+  const meta = $("channelMeta");
+  meta.textContent = details.filter(Boolean).join(" · ");
+  meta.hidden = !meta.textContent;
+  const description = $("channelDescription");
+  description.textContent = channel.description || "";
+  description.hidden = !description.textContent;
+  channelPicture($("channelBanner"), channel.banner);
+  channelPicture($("channelAvatar"), channel.thumbnail);
+}
+
+$("channelBack").addEventListener("click", () => {
+  const query = channelReturnQuery;
+  if (query) {
+    urlInput.value = query;
+    runSearch(query, "youtube");
+  } else setTab("youtube");
+});
+
+async function openYtChannel(channelId, title, placeholder = {}) {
+  if (currentTab !== "youtube") setTab("youtube");
+  if (!editor.hidden) { stopPreview(); showView("landing"); }
+  channelReturnQuery = ytSearchState?.query || channelReturnQuery;
+  ytSearchState = null;
   const myToken = ++searchToken;
-  igPostsMode = false;
-  setLoading(true);
+  searchController?.abort();
+  searchController = new AbortController();
+  const signal = searchController.signal;
+  const notice = $("channelStatus");
   hideStatus();
+  notice.hidden = true;
+  landing.classList.add("channel-mode");
+  channelProfile.hidden = false;
+  renderChannelProfile({ ...placeholder, title });
   resultsEl.hidden = false;
   ytChannels.hidden = true;
   resultsGrid.className = "results-grid";
   renderSkeletons(8, true);
-  resultsTitle.innerHTML = `<button class="back-link" id="chBack">← Vissza</button> ${escapeHtml(title || "Csatorna")} videói`;
-  $("chBack").addEventListener("click", () => runSearch(ytSearchState ? ytSearchState.query : title, "youtube"));
+  resultsTitle.textContent = "Videók";
+  landing.scrollTop = 0;
   try {
-    const res = await fetch(`${API}/api/yt/channel?channel_id=` + encodeURIComponent(channelId) + "&limit=48");
-    if (myToken !== searchToken) return;
+    const res = await fetch(API + "/api/yt/channel?channel_id=" + encodeURIComponent(channelId), { signal });
     const data = await res.json();
     if (myToken !== searchToken) return;
-    if (!res.ok) throw new Error(data.detail || "Nem sikerült.");
-    const vids = data.videos || [];
-    resultsGrid.innerHTML = "";
-    if (!vids.length) { showStatus("Ennek a csatornának nincs elérhető videója.", "error"); return; }
-    vids.forEach((v, i) => resultsGrid.appendChild(makeVideoCard(v, i)));
-  } catch (e) {
+    if (!res.ok) throw new Error(data.detail || "A csatorna most nem érhető el.");
+    const channel = data.channel || {};
+    renderChannelProfile({
+      ...placeholder, ...channel, title: channel.title || title,
+      thumbnail: channel.thumbnail || placeholder.thumbnail,
+      followers: channel.followers ?? placeholder.followers,
+    });
+    resultsGrid.replaceChildren(...(data.videos || []).map((video, index) => makeVideoCard(video, index)));
+    if (!data.videos?.length) {
+      notice.textContent = "A csatornán nincs elérhető videó.";
+      notice.hidden = false;
+    }
+  } catch (error) {
     if (myToken !== searchToken) return;
-    resultsGrid.innerHTML = "";
-    showStatus("Hiba: " + e.message, "error");
-  } finally {
-    if (myToken === searchToken) setLoading(false);
+    resultsGrid.replaceChildren();
+    notice.textContent = error.message;
+    notice.hidden = false;
   }
 }
 
@@ -557,7 +630,7 @@ function openEditor(url) {
   showView("editor");
   edUrl.textContent = url;
   edUrl.title = url;
-  $("editorSource").textContent = {youtube: "YouTube", tiktok: "TikTok", instagram: "Instagram"}[info.source] || "Web";
+  $("editorSource").innerHTML = sourceLogo(info.source) + (sourceNames[info.source] || "Web");
 
   // EGYSÉGES előnézet: MINDEN forrásnál a <video> elem szól, és a timeline mindig
   // kattintható/vágható (a videó hosszára épül). YouTube-nál storyboard-kockákat is
@@ -572,6 +645,14 @@ function openEditor(url) {
   titleEl.classList.remove("title-skeleton");
   titleEl.textContent = info.title || "";
   uploaderEl.textContent = info.uploader || "";
+  if (info.source === "youtube" && info.channelId && info.uploader) {
+    const channelButton = document.createElement("button");
+    channelButton.type = "button";
+    channelButton.className = "uploader-link";
+    channelButton.textContent = info.uploader;
+    channelButton.addEventListener("click", () => openYtChannel(info.channelId, info.uploader));
+    uploaderEl.replaceChildren(channelButton);
+  }
   totTimeEl.textContent = fmtTime(duration);
   curTimeEl.textContent = "0:00";
 
@@ -1131,25 +1212,32 @@ function seekTo(time, force = false) {
   return true;
 }
 
+function seekDuringPreview(time) {
+  if (duration > 0 && (!igVideo.paused || previewWantPlay || drag?.wasPlaying)) {
+    time = Math.max(selStart, Math.min(selEnd, time));
+  }
+  seekTo(time);
+}
+
 function startDrag(kind, ev) {
   if (!(duration > 0)) return;
   ev.preventDefault();
-  pauseSelectedRange();
+  if (kind !== "seek") pauseSelectedRange();
   if (kind === "l") handleL.focus({ preventScroll: true });
   if (kind === "r") handleR.focus({ preventScroll: true });
-  drag = { kind, x0: clientX(ev), s0: selStart, e0: selEnd };
+  drag = { kind, x0: clientX(ev), s0: selStart, e0: selEnd, wasPlaying: !igVideo.paused || previewWantPlay };
   document.body.style.userSelect = "none";
   window.addEventListener("mousemove", moveDrag);
   window.addEventListener("mouseup", endDrag);
   window.addEventListener("touchmove", moveDrag, { passive: false });
   window.addEventListener("touchend", endDrag);
-  if (kind === "seek") { scrubbing(true); seekTo(secAt(clientX(ev))); }
+  if (kind === "seek") { scrubbing(true); seekDuringPreview(secAt(clientX(ev))); }
 }
 
 function moveDrag(ev) {
   if (!drag) return;
   ev.preventDefault();
-  if (drag.kind === "seek") { seekTo(secAt(clientX(ev))); return; }
+  if (drag.kind === "seek") { seekDuringPreview(secAt(clientX(ev))); return; }
 
   const w = timeline.clientWidth;
   const dSec = ((clientX(ev) - drag.x0) / w) * duration;
@@ -1432,7 +1520,7 @@ function renderJobs(jobs) {
       const srcLabel = { instagram: "IG", youtube: "YT", tiktok: "TikTok" }[j.source] || "WEB";
       el.innerHTML = `
         <div class="jc-thumb">${thumb ? `<img src="${thumb}" alt="" onerror="this.style.display='none'">` : ""}
-          <span class="jc-badge ${j.source}">${srcLabel}</span>
+          <span class="jc-badge ${j.source}">${sourceLogo(j.source)}${srcLabel}</span>
         </div>
         <div class="jc-body">
           <div class="jc-title">${escapeHtml(j.title || j.filename || "videó")}</div>
@@ -1636,7 +1724,7 @@ function renderList() {
       el.innerHTML = `
         <label class="lc-check"><input type="checkbox"></label>
         <div class="jc-thumb">${thumb ? `<img src="${thumb}" alt="" onerror="this.style.display='none'">` : ""}
-          <span class="jc-badge ${it.source}">${srcLabel}</span>
+          <span class="jc-badge ${it.source}">${sourceLogo(it.source)}${srcLabel}</span>
         </div>
         <div class="jc-body" style="flex:1;min-width:0">
           <div class="jc-title">${escapeHtml(it.title || "videó")}</div>
@@ -1858,16 +1946,35 @@ grip.addEventListener("pointerdown", e => {
   grip.onpointermove = ev => { if (performance.now() - last > 40) { resize(ev); last = performance.now(); } };
   grip.onpointerup = ev => { resize(ev); grip.onpointermove = null; grip.onpointerup = null; };
 });
+const inputMode = document.documentElement.dataset;
+document.addEventListener("pointerdown", () => { inputMode.interaction = "pointer"; }, true);
 document.addEventListener("keydown", e => {
+  if (e.key === "Tab") inputMode.interaction = "keyboard";
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
     if ($("settingsDialog").open) return;
-    e.preventDefault(); closeList(); closeJobs(); stopPreview(); showView("landing"); urlInput.focus(); urlInput.select();
+    e.preventDefault(); closeList(); closeJobs(); stopPreview(); showView("landing");
+    if (!channelProfile.hidden) setTab("youtube");
+    urlInput.focus(); urlInput.select();
   }
   if (e.key === "Escape") {
     if (listPanel.classList.contains("open")) { closeList(); listBtn.focus(); }
     else if (jobsPanel.classList.contains("open")) { closeJobs(); jobsBtn.focus(); }
   }
   const panel = listPanel.classList.contains("open") ? listPanel : jobsPanel.classList.contains("open") ? jobsPanel : null;
+  const editorShortcut = !editor.hidden && !panel && !$("settingsDialog").open && !e.defaultPrevented
+    && !e.ctrlKey && !e.altKey && !e.metaKey
+    && !e.target.closest("input, textarea, select, [contenteditable], [role='slider']");
+  if (editorShortcut && e.code === "Space") {
+    const keyboardButton = inputMode.interaction === "keyboard" && e.target.closest("button, a[href]");
+    if (!keyboardButton || keyboardButton === playBtn) {
+      e.preventDefault();
+      if (!e.repeat) playBtn.click();
+    }
+  } else if (editorShortcut && duration > 0 && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+    e.preventDefault();
+    const offset = e.key === "ArrowLeft" ? -5 : 5;
+    seekDuringPreview(Math.max(0, Math.min(duration, (pendingPreviewSeek ?? igVideo.currentTime) + offset)));
+  }
   if (e.key === "Tab" && panel) {
     const focusable = [...panel.querySelectorAll('button, input, select, [tabindex="0"]')].filter(x => !x.disabled && x.getClientRects().length);
     const first = focusable[0], last = focusable.at(-1);

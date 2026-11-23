@@ -7,11 +7,11 @@
     <link rel="stylesheet" href="style.css" />
     <link rel="stylesheet" href="themes.css" />
     <link rel="stylesheet" href="desktop.css" />
-    <link rel="icon" type="image/png" href="icon.png" />
+    <link rel="icon" id="appFavicon" type="image/x-icon" href="theme-icons/dark.ico" />
   </head>
   <body>
     <header class="titlebar">
-      <div class="titlebar-drag pywebview-drag-region"><img src="icon.png" width="19" height="19" alt=""><span>Downloader</span></div>
+      <div class="titlebar-drag pywebview-drag-region"><img data-app-icon src="theme-icons/dark.ico" width="19" height="19" alt=""><span>Downloader</span></div>
       <button id="updateShortcut" type="button" class="update-shortcut" hidden>Frissítés</button>
       <div class="window-controls" id="windowControls" hidden>
         <button data-window="minimize" aria-label="Kis méret" title="Kis méret"><svg viewBox="0 0 16 16"><path d="M3 8h10"/></svg></button>
@@ -22,7 +22,7 @@
     <!-- ===== Felső sáv: márka + tabok ===== -->
     <nav class="topbar" aria-label="Főmenü">
       <div class="brand">
-        <img class="brand-mark" src="icon.png" width="36" height="36" alt="">
+        <img class="brand-mark" data-app-icon src="theme-icons/dark.ico" width="36" height="36" alt="">
         <span class="brand-name">Downloader</span>
       </div>
       <div class="tabs" id="tabs">
@@ -31,17 +31,17 @@
           <svg class="line-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M10 13.5a3 3 0 0 0 4.2 0l4-4a3 3 0 0 0-4.2-4.2l-2.3 2.3M14 10.5a3 3 0 0 0-4.2 0l-4 4a3 3 0 0 0 4.2 4.2l2.3-2.3"/></svg>
           Bármely oldal
         </button>
-        <button class="tab" data-tab="youtube" title="YouTube">
-          <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path fill="currentColor" d="M23 12s0-3.8-.5-5.6a2.9 2.9 0 0 0-2-2C18.7 4 12 4 12 4s-6.7 0-8.5.4a2.9 2.9 0 0 0-2 2C1 8.2 1 12 1 12s0 3.8.5 5.6a2.9 2.9 0 0 0 2 2C5.3 20 12 20 12 20s6.7 0 8.5-.4a2.9 2.9 0 0 0 2-2C23 15.8 23 12 23 12zM9.8 15.3V8.7l5.7 3.3z"/></svg>
-          YouTube
+        <button class="tab" data-tab="youtube" title="YouTube" aria-label="YouTube">
+          <span class="platform-glyph" aria-hidden="true"><img src="brands/youtube.jpg" alt=""></span>
+          <span class="platform-wordmark" aria-hidden="true"><img src="brands/youtube-wordmark.jpg" alt=""></span>
         </button>
-        <button class="tab" data-tab="tiktok" title="TikTok">
-          <svg class="line-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M14 4v11a3.7 3.7 0 1 1-3.7-3.7M14 4a5.4 5.4 0 0 0 5.3 5.1"/></svg>
-          TikTok
+        <button class="tab" data-tab="tiktok" title="TikTok" aria-label="TikTok">
+          <span class="platform-glyph" aria-hidden="true"><img src="brands/tiktok.png" alt=""></span>
+          <span class="platform-wordmark" aria-hidden="true"><img src="brands/tiktok-wordmark.jpg" alt=""></span>
         </button>
-        <button class="tab" data-tab="instagram" title="Instagram">
-          <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path fill="currentColor" d="M12 2.2c3.2 0 3.6 0 4.85.07 1.17.05 1.8.25 2.23.41.56.22.96.48 1.38.9.42.42.68.82.9 1.38.16.42.36 1.06.41 2.23.06 1.26.07 1.64.07 4.81s0 3.55-.07 4.81c-.05 1.17-.25 1.8-.41 2.23-.22.56-.48.96-.9 1.38-.42.42-.82.68-1.38.9-.42.16-1.06.36-2.23.41-1.26.06-1.64.07-4.85.07s-3.6 0-4.85-.07c-1.17-.05-1.8-.25-2.23-.41a3.8 3.8 0 0 1-1.38-.9 3.8 3.8 0 0 1-.9-1.38c-.16-.42-.36-1.06-.41-2.23C2.2 15.55 2.2 15.17 2.2 12s0-3.55.07-4.81c.05-1.17.25-1.8.41-2.23.22-.56.48-.96.9-1.38.42-.42.82-.68 1.38-.9.42-.16 1.06-.36 2.23-.41C8.45 2.2 8.83 2.2 12 2.2zm0 1.8c-3.12 0-3.49.01-4.72.07-.91.04-1.4.2-1.73.32-.43.17-.74.37-1.07.7-.33.33-.53.64-.7 1.07-.13.33-.28.82-.32 1.73C3.4 8.93 3.4 9.3 3.4 12s0 3.07.06 4.31c.04.91.2 1.4.32 1.73.17.43.37.74.7 1.07.33.33.64.53 1.07.7.33.13.82.28 1.73.32 1.23.06 1.6.07 4.72.07s3.49-.01 4.72-.07c.91-.04 1.4-.2 1.73-.32.43-.17.74-.37 1.07-.7.33-.33.53-.64.7-1.07.13-.33.28-.82.32-1.73.06-1.24.07-1.61.07-4.31s0-3.07-.07-4.31c-.04-.91-.19-1.4-.32-1.73a2.9 2.9 0 0 0-.7-1.07 2.9 2.9 0 0 0-1.07-.7c-.33-.13-.82-.28-1.73-.32C15.49 4.01 15.12 4 12 4zm0 3.06A4.94 4.94 0 1 1 7.06 12 4.94 4.94 0 0 1 12 7.06zm0 8.15A3.21 3.21 0 1 0 8.79 12 3.21 3.21 0 0 0 12 15.21zm6.29-8.35a1.15 1.15 0 1 1-1.15-1.15 1.15 1.15 0 0 1 1.15 1.15z"/></svg>
-          Instagram
+        <button class="tab" data-tab="instagram" title="Instagram" aria-label="Instagram">
+          <span class="platform-glyph" aria-hidden="true"><img src="brands/instagram.jpg" alt=""></span>
+          <span class="platform-wordmark" aria-hidden="true"><img src="brands/instagram-wordmark.jpg" alt=""></span>
         </button>
       </div>
       <span class="nav-label library-label">MÉDIATÁR</span>
@@ -184,15 +184,15 @@
           <h2 id="sourceTitle">Forrás kiválasztása</h2>
           <div class="source-grid">
             <button class="source-card" type="button" data-source="youtube">
-              <span class="source-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="23" height="23"><path fill="currentColor" d="M21.5 7a3 3 0 0 0-2-2C17.9 4.6 12 4.6 12 4.6S6.1 4.6 4.5 5a3 3 0 0 0-2 2C2 8.6 2 12 2 12s0 3.4.5 5a3 3 0 0 0 2 2c1.6.4 7.5.4 7.5.4s5.9 0 7.5-.4a3 3 0 0 0 2-2c.5-1.6.5-5 .5-5s0-3.4-.5-5zM10 15.2V8.8l5.5 3.2z"/></svg></span>
+              <span class="source-icon" aria-hidden="true"><img src="brands/youtube.jpg" alt=""></span>
               <span class="source-copy"><strong>YouTube</strong><small>Link vagy keresés cím szerint</small></span>
             </button>
             <button class="source-card" type="button" data-source="tiktok">
-              <span class="source-icon" aria-hidden="true"><svg class="line-icon" viewBox="0 0 24 24" width="23" height="23"><path d="M14 4v11a3.7 3.7 0 1 1-3.7-3.7M14 4a5.4 5.4 0 0 0 5.3 5.1"/></svg></span>
+              <span class="source-icon" aria-hidden="true"><img src="brands/tiktok.png" alt=""></span>
               <span class="source-copy"><strong>TikTok</strong><small>Videó- vagy megosztási link</small></span>
             </button>
             <button class="source-card" type="button" data-source="instagram">
-              <span class="source-icon" aria-hidden="true"><svg class="line-icon" viewBox="0 0 24 24" width="22" height="22"><rect x="3.2" y="3.2" width="17.6" height="17.6" rx="5"/><circle cx="12" cy="12" r="4"/><path d="M17.3 6.8v.1"/></svg></span>
+              <span class="source-icon" aria-hidden="true"><img src="brands/instagram.jpg" alt=""></span>
               <span class="source-copy"><strong>Instagram</strong><small>Reel vagy videóposzt</small></span>
             </button>
           </div>
@@ -201,6 +201,21 @@
 
       <!-- keresési találatok rács -->
       <section class="results" id="results" hidden>
+        <section class="channel-profile" id="channelProfile" aria-labelledby="channelName" hidden>
+          <button class="back-link channel-back" id="channelBack" type="button">← Vissza</button>
+          <div class="channel-shell">
+            <div class="channel-banner"><img id="channelBanner" alt="" hidden></div>
+            <div class="channel-identity">
+              <div class="channel-avatar"><span id="channelInitial"></span><img id="channelAvatar" alt="" hidden></div>
+              <div class="channel-details">
+                <h1><span id="channelName"></span><span class="channel-verified" id="channelVerified" title="Hitelesített csatorna" aria-label="Hitelesített csatorna" hidden>✓</span></h1>
+                <p class="channel-meta" id="channelMeta" hidden></p>
+                <p class="channel-description" id="channelDescription" hidden></p>
+              </div>
+            </div>
+          </div>
+          <p class="channel-status" id="channelStatus" role="status" hidden></p>
+        </section>
         <div class="results-head">
           <span id="resultsTitle">Találatok</span>
         </div>
@@ -221,7 +236,6 @@
           <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M15 18l-6-6 6-6"/></svg>
         </button>
         <div class="ed-url" id="edUrl"></div>
-        <span class="editor-source" id="editorSource"></span>
       </header>
 
       <!-- Fő terület: bal=lejátszó, jobb=beállítások -->
@@ -239,7 +253,7 @@
           </div>
           <section class="ed-timeline" id="edTimeline">
             <div class="tl-controls">
-              <button id="playBtn" class="icon-btn play-btn" title="Lejátszás/szünet">
+              <button id="playBtn" class="icon-btn play-btn" title="Lejátszás vagy szünet (Szóköz)">
                 <svg id="playIcon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
                   <path id="playPath" fill="currentColor" d="M8 5v14l11-7z"/>
                 </svg>
@@ -279,7 +293,7 @@
         </section>
 
         <aside class="ed-side" aria-labelledby="saveTitle">
-          <h2 id="saveTitle">Mentés</h2>
+          <h2 id="saveTitle">Mentés <span class="editor-source" id="editorSource"></span></h2>
           <div class="side-block">
             <span class="block-label">Formátum</span>
             <div class="segment" id="formatToggle">

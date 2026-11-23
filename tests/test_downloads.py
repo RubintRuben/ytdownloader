@@ -44,6 +44,16 @@ class DownloadTests(unittest.TestCase):
                 for server in servers:
                     server.should_exit = True
 
+    def test_channel_links_are_canonical_and_limited_to_youtube(self):
+        self.assertEqual(app._youtube_channel_url("@veritasium"),
+                         "https://www.youtube.com/@veritasium/videos")
+        self.assertEqual(app._youtube_channel_url("https://m.youtube.com/@veritasium/featured?x=1"),
+                         "https://www.youtube.com/@veritasium/videos")
+        for url in ("https://youtube.com.example/@channel", "https://user@youtube.com/@channel",
+                    "https://youtube.com/watch?v=abc"):
+            with self.assertRaises(ValueError):
+                app._youtube_channel_url(url)
+
     def test_expired_metadata_is_refreshed(self):
         app._info_cache['https://example.org/video|'] = (app.time.monotonic() - 601, {'title': 'old'})
         with patch.object(app, '_extract_info_once', return_value={'title':'fresh'}) as extract:

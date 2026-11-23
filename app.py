@@ -780,21 +780,51 @@ def _search_youtube_channels(query: str, limit: int = 6) -> list[dict]:
     return out
 
 
-def _youtube_channel_videos(channel_url: str, limit: int = 48) -> list[dict]:
-    """Egy YouTube csatorna legutóbbi videói (a csatorna /videos lapjáról, gyors flat módban)."""
+def _youtube_channel_url(value: str) -> str:
+    """Canonicalize public YouTube channel addresses before passing them to yt-dlp."""
+    if re.fullmatch(r"UC[A-Za-z0-9_-]{22}", value):
+        return f"https://www.youtube.com/channel/{value}/videos"
+    if value.startswith("@"):
+        value = f"https://www.youtube.com/{value}"
+    parsed = urllib.parse.urlsplit(value)
+    path = urllib.parse.unquote(parsed.path).rstrip("/")
+    match = re.fullmatch(
+        r"/(@[\w.-]{2,100}|channel/UC[A-Za-z0-9_-]{22}|(?:c|user)/[\w.-]{1,100})"
+        r"(?:/(?:featured|videos|shorts|streams|playlists|community|about))?",
+        path,
+    )
+    if (parsed.scheme not in ("http", "https") or not is_valid_youtube_url(value)
+            or parsed.username or parsed.password or parsed.port is not None or not match):
+        raise ValueError("Invalid public YouTube channel address")
+    safe_path = urllib.parse.quote(match[1], safe="/@")
+    return f"https://www.youtube.com/{safe_path}/videos"
+
+
+def _youtube_channel_videos(channel_url: str, limit: int = 48) -> dict:
+    """Load channel metadata and flat uploads from the same Videos request."""
     opts = _base_opts()
     opts.update({"skip_download": True, "extract_flat": True, "playlistend": limit})
-    # a csatorna 'Videos' lapja adja a legutóbbi feltöltéseket
-    base_url = channel_url.rstrip("/")
-    if not base_url.endswith("/videos"):
-        base_url = base_url + "/videos"
+    with YoutubeDL(opts) as ydl:
+        data = ydl.extract_info(channel_url, download=False) or {}
+
+    thumbs = [t for t in data.get("thumbnails") or [] if t.get("url")]
+    banners = [t for t in thumbs if t.get("preference") == -10]
+    avatars = [t for t in thumbs if t.get("id") == "avatar_uncropped"
+               or (t.get("width") and t.get("width") == t.get("height"))]
+    banner = max(banners, key=lambda t: t.get("width") or 0, default={}).get("url")
+    avatar = max(avatars, key=lambda t: t.get("width") or 0, default={}).get("url")
+    handle = data.get("uploader_id") or ""
+    channel = {
+        "id": data.get("channel_id") or data.get("id"),
+        "title": data.get("channel") or data.get("uploader") or data.get("title"),
+        "handle": handle if handle.startswith("@") else None,
+        "followers": data.get("channel_follower_count"),
+        "verified": bool(data.get("channel_is_verified")),
+        "description": data.get("description") or "",
+        "thumbnail": avatar,
+        "banner": banner,
+    }
     out: list[dict] = []
-    try:
-        with YoutubeDL(opts) as ydl:
-            data = ydl.extract_info(base_url, download=False)
-    except Exception as e:  # noqa: BLE001
-        print("[yt channel videos] hiba:", repr(e), flush=True)
-        return out
     # a csatorna-lap néha tab-okba ágyazza az entry-ket → kilapítjuk
     entries = (data or {}).get("entries", []) or []
     flat: list[dict] = []
@@ -822,7 +852,7 @@ def _youtube_channel_videos(channel_url: str, limit: int = 48) -> list[dict]:
         })
         if len(out) >= limit:
             break
-    return out
+    return {"channel": channel, "videos": out}
 
 
 _search_cache: dict = {}
@@ -830,7 +860,7 @@ _search_pending: dict = {}
 
 
 async def _cached_search(kind, query, limit, worker):
-    key = (kind, query.casefold(), limit)
+    key = (kind, query if kind == "channel" else query.casefold(), limit)
     cached = _search_cache.get(key)
     if cached and time.monotonic() - cached[0] < 300:
         return cached[1]
@@ -877,21 +907,16 @@ async def api_search(q: str = Query(..., max_length=300), limit: int = 18, sourc
 @app.get("/api/yt/channel")
 async def api_yt_channel(channel_id: str = Query(...), limit: int = 48):
     """Egy YouTube csatorna legutóbbi videói (a csatorna-kártyára kattintva)."""
-    cid = channel_id.strip()
-    # elfogadunk teljes URL-t vagy nyers UC… azonosítót
-    if cid.startswith("http"):
-        channel_url = cid
-    elif re.fullmatch(r"UC[A-Za-z0-9_-]{20,}", cid):
-        channel_url = f"https://www.youtube.com/channel/{cid}"
-    else:
-        raise HTTPException(400, "Érvénytelen csatorna-azonosító.")
+    try:
+        channel_url = _youtube_channel_url(channel_id.strip())
+    except ValueError as exc:
+        raise HTTPException(400, "Érvénytelen YouTube-csatorna.") from exc
     limit = max(1, min(80, limit))
     try:
-        videos = await asyncio.to_thread(_youtube_channel_videos, channel_url, limit)
-    except Exception as e:  # noqa: BLE001
-        print("[yt channel] hiba:", repr(e), flush=True)
-        raise HTTPException(500, "Nem sikerült lekérni a csatorna videóit.") from e
-    return {"videos": videos}
+        return await _cached_search("channel", channel_url, limit, _youtube_channel_videos)
+    except Exception as exc:
+        _log(f"YouTube channel failed: {type(exc).__name__}")
+        raise HTTPException(502, "A csatorna adatai most nem érhetők el.") from exc
 
 
 # ----------------------------------------------------------------------------
@@ -954,6 +979,7 @@ async def api_info(url: str = Query(...), browser: str = "", source: str = "any"
         "duration": _preview_durations.get(url) or info.get("duration") or 0,
         "durationString": info.get("duration_string") or "",
         "thumbnail": best_thumbnail(info),
+        "channelId": info.get("channel_id") if source == "youtube" else None,
         "resolutions": heights,
         "storyboard": sb,
         "directUrl": direct,
@@ -2153,15 +2179,16 @@ def _start_local_server(preferred: int) -> str | None:
     return None
 
 
-def _app_icon_path() -> str | None:
-    for cand in (
-        BASE_DIR / "icon.ico",
-        APP_DIR / "icon.ico",
-    ):
-        if cand.exists():
-            return str(cand)
+def _app_icon_path(theme: str | None = None) -> str | None:
+    if theme in _THEMES:
+        themed = STATIC_DIR / "theme-icons" / f"{theme}.ico"
+        if themed.is_file():
+            return str(themed)
+    for directory in (BASE_DIR, APP_DIR):
+        icon = directory / "icon.ico"
+        if icon.is_file():
+            return str(icon)
     return None
-
 
 def _open_main_app_in_window(window) -> bool:
     url = _start_local_server(int(os.environ.get("PORT", "7860")))
@@ -2190,6 +2217,7 @@ class _NativeApi:
         self._window = None
         self._installing = False
         self._theme_lock = threading.Lock()
+        self._theme_icon = None
 
     def set_window(self, w):
         self._window = w
@@ -2272,14 +2300,34 @@ class _NativeApi:
 
     def theme(self) -> str | None:
         theme = _load_settings().get("theme")
-        return theme if isinstance(theme, str) and theme in _THEMES else None
+        return theme if isinstance(theme, str) and theme in (_THEMES | {"auto"}) else None
 
     def set_theme(self, theme: str) -> None:
-        if theme in _THEMES:
+        if isinstance(theme, str) and theme in (_THEMES | {"auto"}):
             with self._theme_lock:
                 settings = _load_settings()
                 settings["theme"] = theme
                 _save_settings(settings)
+
+    def set_theme_icon(self, theme: str) -> None:
+        if os.name != "nt" or not self._window or not isinstance(theme, str) or theme not in _THEMES:
+            return
+        icon_path = _app_icon_path(theme)
+        if not icon_path:
+            return
+        from System import Action
+        from System.Drawing import Icon
+        form = self._window.native
+
+        def apply_icon():
+            icon = Icon(icon_path)
+            previous = self._theme_icon
+            form.Icon = icon
+            self._theme_icon = icon
+            if previous:
+                previous.Dispose()
+
+        form.Invoke(Action(apply_icon))
 
     def update_status(self) -> dict:
         return _updater.status()

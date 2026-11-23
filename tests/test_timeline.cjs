@@ -59,3 +59,22 @@ const playback = source.slice(source.indexOf('function renderPlayhead('), source
   assert.equal(video.paused, true);
 }
 console.log('PASS: trim labels round correctly and playback stays within the selection');
+
+{
+  const seeks = [];
+  const ctx = {
+    duration: 20, selStart: 4, selEnd: 12, previewWantPlay: false, drag: null,
+    igVideo: { paused: false }, seekTo(time) { seeks.push(time); }
+  };
+  const seek = source.slice(source.indexOf("function seekDuringPreview("), source.indexOf("function startDrag("));
+  vm.createContext(ctx);
+  vm.runInContext(seek, ctx);
+  ctx.seekDuringPreview(8);
+  ctx.seekDuringPreview(2);
+  ctx.seekDuringPreview(13);
+  assert.equal(ctx.igVideo.paused, false);
+  ctx.igVideo.paused = true;
+  ctx.seekDuringPreview(2);
+  assert.deepEqual(seeks, [8, 4, 12, 2]);
+}
+console.log('PASS: scrubbing preserves playback and respects active trim boundaries');

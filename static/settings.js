@@ -2,6 +2,7 @@
   const themes = {
     dark: ["Sötét", "Éjkék, ibolya"],
     light: ["Világos", "Krémszín, indigó"],
+    auto: ["Automatikus", "A Windows megjelenése"],
     aurora: ["Auróra", "Éjkék, türkiz fény"],
     ocean: ["Óceán", "Mélytenger, kobalt"],
     ember: ["Parázs", "Meleg grafit, réz"],
@@ -21,7 +22,10 @@
   const tokenInput = $("updateToken");
   const removeToken = $("removeUpdateToken");
   const storageKey = "downloader.theme";
+  const systemDark = matchMedia("(prefers-color-scheme: dark)");
+  let themePreference = "dark";
   let changedTheme = false;
+  let nativeThemeTask = Promise.resolve();
   let updatePoll;
   let checkInterval;
   let native;
@@ -45,20 +49,34 @@
     button.append(swatch, caption);
     button.addEventListener("click", () => {
       changedTheme = true;
-      applyTheme(key);
-      native?.set_theme(key).catch(console.error);
+      applyTheme(key, true);
     });
     grid.append(button);
   }
 
-  function applyTheme(key) {
-    if (!Object.hasOwn(themes, key)) key = "dark";
-    document.documentElement.dataset.theme = key;
-    try { localStorage.setItem(storageKey, key); } catch { /* Native settings can persist independently. */ }
+  function applyTheme(key, saveNative = false) {
+    themePreference = Object.hasOwn(themes, key) ? key : "dark";
+    const resolved = themePreference === "auto" ? (systemDark.matches ? "dark" : "light") : themePreference;
+    document.documentElement.dataset.theme = resolved;
+    const icon = "theme-icons/" + resolved + ".ico";
+    $("appFavicon").href = icon;
+    for (const img of document.querySelectorAll("[data-app-icon]")) img.src = icon;
+    try { localStorage.setItem(storageKey, themePreference); } catch { /* Native storage works independently. */ }
     for (const button of grid.children) {
-      button.setAttribute("aria-pressed", String(button.dataset.value === key));
+      button.setAttribute("aria-pressed", String(button.dataset.value === themePreference));
+    }
+    if (native) {
+      const chosen = themePreference;
+      nativeThemeTask = nativeThemeTask.catch(console.error).then(async () => {
+        if (saveNative) await native.set_theme(chosen);
+        await native.set_theme_icon?.(resolved);
+      });
     }
   }
+
+  systemDark.addEventListener("change", () => {
+    if (themePreference === "auto") applyTheme("auto");
+  });
 
   function openSettings() {
     closeList();
@@ -162,7 +180,7 @@
     try {
       const selected = await native.theme();
       if (selected && !changedTheme) applyTheme(selected);
-      else if (changedTheme) await native.set_theme(document.documentElement.dataset.theme);
+      else applyTheme(themePreference, changedTheme);
       const data = await native.update_status();
       renderUpdate(data);
       if (data.state !== "source") {
