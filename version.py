@@ -1,3 +1,3 @@
 """Version shared by the desktop UI, Windows build and release workflow."""
 
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.1.0"

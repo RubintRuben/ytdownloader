@@ -1,7 +1,7 @@
 (() => {
   const themes = {
-    dark: ["Sötét", "Palaszürke, mentazöld"],
-    light: ["Világos", "Törtfehér, mélyzöld"],
+    dark: ["Sötét", "Éjkék, ibolya"],
+    light: ["Világos", "Krémszín, indigó"],
     aurora: ["Auróra", "Éjkék, türkiz fény"],
     ocean: ["Óceán", "Mélytenger, kobalt"],
     ember: ["Parázs", "Meleg grafit, réz"],
@@ -99,7 +99,7 @@
     if (canInstall) shortcut.textContent = "Frissítés · v" + data.available;
     progress.hidden = data.state !== "downloading";
     progress.value = data.progress || 0;
-    access.hidden = data.state === "source";
+    access.hidden = data.state !== "access_required";
     if ("storedToken" in data) removeToken.hidden = !data.storedToken;
   }
 

@@ -30,7 +30,8 @@ const $ = (id) => document.getElementById(id);
 const tabsEl = $("tabs");
 const heroTitle = $("heroTitle");
 const heroSub = $("heroSub");
-const heroPills = $("heroPills");
+const sourceHint = $("sourceHint");
+const sourcePanel = $("sourcePanel");
 const landing = $("landing");
 const searchForm = $("searchForm");
 const urlInput = $("url");
@@ -195,11 +196,33 @@ tabsEl.addEventListener("click", (e) => {
   setTab(b.dataset.tab);
 });
 
-const _pillSvg = `<svg viewBox="0 0 24 24" width="13" height="13"><path fill="currentColor" d="M9 16.2l-3.5-3.5L4 14.2 9 19.2 20 8.2l-1.4-1.4z"/></svg>`;
-function setPills(items) {
-  heroPills.innerHTML = items.map((t) =>
-    `<span class="hero-pill">${_pillSvg}${escapeHtml(t)}</span>`).join("");
+sourcePanel.addEventListener("click", (event) => {
+  const card = event.target.closest("[data-source]");
+  if (card) setTab(card.dataset.source);
+});
+
+const hero = document.querySelector(".hero");
+if (matchMedia("(hover: hover) and (prefers-reduced-motion: no-preference)").matches) {
+  hero.addEventListener("pointermove", (event) => {
+    const rect = hero.getBoundingClientRect();
+    hero.style.setProperty("--spot-x", (event.clientX - rect.left) + "px");
+    hero.style.setProperty("--spot-y", (event.clientY - rect.top) + "px");
+  });
 }
+
+$("pasteLinkBtn").addEventListener("click", async () => {
+  try {
+    const native = window.pywebview?.api;
+    const text = native?.clipboard_text ? await native.clipboard_text() : await navigator.clipboard.readText();
+    if (text?.trim()) {
+      urlInput.value = text.trim();
+      hideStatus();
+    } else showStatus("A vágólapon most nincs szöveg.", "error");
+  } catch {
+    showStatus("Illeszd be a linket a Ctrl+V billentyűvel.", "error");
+  }
+  urlInput.focus();
+});
 
 function setTab(tab) {
   if (tab === "other") tab = "any";
@@ -211,32 +234,32 @@ function setTab(tab) {
   }
 
   currentTab = tab;
+  sourcePanel.hidden = tab !== "any";
   tabsEl.querySelectorAll(".tab").forEach((button) => {
     const selected = button.dataset.tab === tab;
     button.classList.toggle("active", selected);
     button.setAttribute("aria-pressed", String(selected));
   });
-  // landing szövegek + placeholder + pills (fülenkénti hangulat)
   if (tab === "instagram") {
     heroTitle.textContent = "Instagram letöltő";
     heroSub.textContent = "Illeszd be egy reel vagy videóposzt linkjét.";
     urlInput.placeholder = "Illeszd be egy Instagram reel/poszt linkjét…";
-    setPills(["Reelek & videók", "Vágás", "Hanggal", "Gyors"]);
+    sourceHint.textContent = "";
   } else if (tab === "tiktok") {
     heroTitle.textContent = "TikTok letöltő";
     heroSub.textContent = "Használhatod a megosztásnál kapott rövid linket vagy a videó teljes címét.";
     urlInput.placeholder = "TikTok-videó linkje…";
-    setPills(["MP4 videó", "MP3 hang", "Vágás"]);
+    sourceHint.textContent = "";
   } else if (tab === "any") {
     heroTitle.textContent = "Videók letöltése";
-    heroSub.textContent = "Illeszd be a videó linkjét, majd válaszd ki a formátumot, a minőséget és a menteni kívánt részletet.";
-    urlInput.placeholder = "https://…";
-    setPills(["YouTube", "TikTok", "Instagram", "Vimeo", "Dailymotion", "Más oldalak"]);
+    heroSub.textContent = "Illeszd be a linket, és mentsd el a videót vagy a hangját.";
+    urlInput.placeholder = "Illessz be egy videólinket…";
+    sourceHint.textContent = "Vimeo- és Dailymotion-linkeket is megnyit.";
   } else {
-    heroTitle.textContent = "Mit szeretnél elmenteni?";
+    heroTitle.textContent = "YouTube-letöltő";
     heroSub.textContent = "Keress a videó címére, vagy illeszd be a YouTube-linket.";
     urlInput.placeholder = "YouTube link vagy keresőszó…";
-    setPills(["Keresés cím alapján", "4K-ig", "MP3 hang", "Vágás"]);
+    sourceHint.textContent = "";
   }
   // tab-váltáskor tiszta lap — és a futó keresést azonnal érvénytelenítjük,
   // hogy a régi tab válasza NE jelenjen meg az új tabon
@@ -531,6 +554,8 @@ function openEditor(url) {
   hideStatus();
   showView("editor");
   edUrl.textContent = url;
+  edUrl.title = url;
+  $("editorSource").textContent = {youtube: "YouTube", tiktok: "TikTok", instagram: "Instagram"}[info.source] || "Web";
 
   // EGYSÉGES előnézet: MINDEN forrásnál a <video> elem szól, és a timeline mindig
   // kattintható/vágható (a videó hosszára épül). YouTube-nál storyboard-kockákat is
@@ -869,7 +894,10 @@ backBtn.addEventListener("click", () => {
   urlInput.focus();
 });
 
-function setPlayIcon(playing) { playPath.setAttribute("d", playing ? PAUSE_D : PLAY_D); }
+function setPlayIcon(playing) {
+  playPath.setAttribute("d", playing ? PAUSE_D : PLAY_D);
+  playBtn.setAttribute("aria-label", playing ? "Szünet" : "Lejátszás");
+}
 
 // A playhead/idő a <video> elem állásából frissül (egységes minden forrásnál).
 function startPlayhead() {

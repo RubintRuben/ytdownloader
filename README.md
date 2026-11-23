@@ -9,7 +9,7 @@ Windowsos videó- és hangletöltő helyi előnézettel, vágással és letölt�
 3. Az előnézetnél válassz **MP4** videót vagy **MP3** hangot, állítsd be a minőséget, majd jelöld ki a menteni kívánt részt. A vágás a kulcsképkockához igazodik.
 4. A **Letöltések** panelen követheted a folyamatot és mentheted az elkészült fájlokat. Az előkészített videókat a **Lista** panelen is gyűjtheted és szerkesztheted.
 
-A **Beállítások** menüben hét alkalmazástéma van. A választás a következő indításkor is megmarad. A keresőmező gyorsbillentyűje **Ctrl+K**.
+A **Beállítások** menüben hét alkalmazástéma van. A választás a következő indításkor is megmarad. A **Beillesztés** gomb a vágólapról másolja a linket a mezőbe. A keresőmező gyorsbillentyűje **Ctrl+K**.
 
 Az előnézet először a forrás kis felbontású, közvetlenül tekerhető streamjét használja. Külön videó- és hangsáv vagy csak HLS esetén fragmentált MP4-et játszik le már az átalakítás közben. Egyes forrásokhoz teljes helyi előkészítés szükséges. Az első képkockáig eltelt idő és a támogatott felbontások a szolgáltatótól függenek.
 
@@ -17,7 +17,7 @@ Az előnézet először a forrás kis felbontású, közvetlenül tekerhető str
 
 Az EXE indításkor ellenőrzi a GitHub legújabb stabil kiadását. Ha van újabb verzió, megjelenik a **Frissítés** gomb. A Downloader letölti és SHA-256-tal ellenőrzi a fájlt. A futó letöltések befejezése és mentése után lecseréli a futtatható fájlt, majd újraindítja az alkalmazást.
 
-Privát GitHub-tárolónál a **Beállítások → Hozzáférés privát GitHub-tárolóhoz** részen állíts be egy [finomhangolt személyes tokent](https://github.com/settings/personal-access-tokens/new). A jogosultságot a `RubintRuben/ytdownloader` tárolóra korlátozd, **Contents → Read-only** hozzáféréssel. A tokent az alkalmazás az aktuális Windows-fiókhoz kötve, titkosítva tárolja. Fejlesztéshez a `DOWNLOADER_GITHUB_TOKEN` környezeti változó is használható.
+Ha a privát GitHub-tárolóhoz még nincs frissítési hozzáférés, a **Beállítások → Hozzáférés privát GitHub-tárolóhoz** részen állíts be egy [finomhangolt személyes tokent](https://github.com/settings/personal-access-tokens/new). A jogosultságot a `RubintRuben/ytdownloader` tárolóra korlátozd, **Contents → Read-only** hozzáféréssel. A tokent az alkalmazás az aktuális Windows-fiókhoz kötve, titkosítva tárolja. Fejlesztéshez a `DOWNLOADER_GITHUB_TOKEN` környezeti változó is használható.
 
 ## Fejlesztés és kiadás
 

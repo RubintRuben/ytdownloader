@@ -2229,6 +2229,13 @@ class _NativeApi:
         except Exception as exc:
             _log(f"Window corner styling unavailable: {exc}")
 
+    def clipboard_text(self) -> str:
+        if os.name != "nt" or not self._window:
+            return ""
+        from System import Func, String
+        from System.Windows.Forms import Clipboard
+        return str(self._window.native.Invoke(Func[String](lambda: Clipboard.GetText())))
+
     def window_action(self, action: str):
         if not self._window:
             return
@@ -2458,7 +2465,7 @@ def main():
             width=1180,
             height=820,
             min_size=(900, 640),
-            background_color="#10131a",
+            background_color="#0e0d16",
             frameless=True,
             easy_drag=False,
             shadow=True,

@@ -138,14 +138,6 @@ body {
 #url::placeholder { color: var(--muted-2); }
 
 /* feature pill-ek a kereső alatt (kitölti a teret, hangulat) */
-.hero-pills { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }
-.hero-pill {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 0.8rem; font-weight: 500; color: var(--muted);
-  padding: 6px 12px; border-radius: 999px;
-  background: rgba(255,255,255,0.03); border: 1px solid var(--line);
-}
-.hero-pill svg { color: var(--accent); }
 
 .btn-primary {
   display: inline-flex; align-items: center; gap: 8px;

@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Downloader</title>
     <link rel="stylesheet" href="style.css" />
-    <link rel="stylesheet" href="desktop.css" />
     <link rel="stylesheet" href="themes.css" />
+    <link rel="stylesheet" href="desktop.css" />
     <link rel="icon" type="image/png" href="icon.png" />
   </head>
   <body>
     <header class="titlebar">
-      <div class="titlebar-drag pywebview-drag-region"><img src="icon.png" width="18" height="18" alt="">Downloader</div>
+      <div class="titlebar-drag pywebview-drag-region"><img src="icon.png" width="19" height="19" alt=""><span>Downloader</span></div>
       <button id="updateShortcut" type="button" class="update-shortcut" hidden>Frissítés</button>
       <div class="window-controls" id="windowControls" hidden>
         <button data-window="minimize" aria-label="Kis méret" title="Kis méret"><svg viewBox="0 0 16 16"><path d="M3 8h10"/></svg></button>
@@ -153,32 +153,53 @@
 
     <!-- ===== Kezdő nézet: kereső + (YT) találatok ===== -->
     <main id="landing" class="landing">
-      <div class="hero">
-        <div class="hero-emblem" aria-hidden="true"><img src="icon.png" width="76" height="76" alt=""></div>
-        <h1 class="hero-title" id="heroTitle">Videók letöltése</h1>
-        <p class="hero-sub" id="heroSub"></p>
+      <div class="workspace">
+        <section class="hero" aria-labelledby="heroTitle">
+          <div class="hero-art" aria-hidden="true">
+            <img src="hero-media.webp" alt="" width="720" height="720" fetchpriority="high">
+          </div>
+          <div class="hero-content">
+            <h1 class="hero-title" id="heroTitle">Videók letöltése</h1>
+            <p class="hero-sub" id="heroSub"></p>
+          </div>
+          <form class="search-field" id="searchForm" autocomplete="off">
+            <svg class="line-icon search-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="10.8" cy="10.8" r="5.8"/><path d="m15.2 15.2 4.3 4.3"/></svg>
+            <input id="url" type="text" aria-label="Videólink vagy YouTube-keresőszó"
+                   placeholder="Illessz be egy videólinket…" autocomplete="off" spellcheck="false">
+            <button id="pasteLinkBtn" type="button" class="paste-button" title="Beillesztés a vágólapról" aria-label="Beillesztés a vágólapról">
+              <svg class="line-icon" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/></svg>
+              <span>Beillesztés</span>
+            </button>
+            <button id="fetchBtn" class="btn-primary" type="submit">
+              <span class="btn-text">Megnyitás</span>
+              <svg class="line-icon submit-arrow" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg>
+              <span class="spinner" hidden></span>
+            </button>
+          </form>
+          <div class="hero-foot">
+            <span id="sourceHint"></span>
+            <kbd class="search-key" title="Ugrás a keresőre">Ctrl K</kbd>
+          </div>
+          <div id="status" class="status" role="status" hidden></div>
+        </section>
 
-        <form class="search-field" id="searchForm" autocomplete="off">
-          <span class="sf-icon" id="sfIcon">
-            <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M10 4a6 6 0 1 0 3.7 10.74l4.78 4.78 1.42-1.42-4.78-4.78A6 6 0 0 0 10 4zm0 2a4 4 0 1 1 0 8 4 4 0 0 1 0-8z"/></svg>
-          </span>
-          <input
-            id="url"
-            type="text"
-            aria-label="Videó linkje vagy YouTube keresőszó"
-            placeholder="https://…"
-            autocomplete="off"
-            spellcheck="false"
-          />
-          <kbd class="search-key">Ctrl K</kbd>
-          <button id="fetchBtn" class="btn-primary" type="submit">
-            <span class="btn-text">Keresés</span>
-            <span class="spinner" hidden></span>
-          </button>
-        </form>
-
-        <div class="hero-pills" id="heroPills"></div>
-        <div id="status" class="status" role="status" hidden></div>
+        <section class="source-panel" id="sourcePanel" aria-labelledby="sourceTitle">
+          <h2 id="sourceTitle">Forrás kiválasztása</h2>
+          <div class="source-grid">
+            <button class="source-card" type="button" data-source="youtube">
+              <span class="source-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="23" height="23"><path fill="currentColor" d="M21.5 7a3 3 0 0 0-2-2C17.9 4.6 12 4.6 12 4.6S6.1 4.6 4.5 5a3 3 0 0 0-2 2C2 8.6 2 12 2 12s0 3.4.5 5a3 3 0 0 0 2 2c1.6.4 7.5.4 7.5.4s5.9 0 7.5-.4a3 3 0 0 0 2-2c.5-1.6.5-5 .5-5s0-3.4-.5-5zM10 15.2V8.8l5.5 3.2z"/></svg></span>
+              <span class="source-copy"><strong>YouTube</strong><small>Link vagy keresés cím szerint</small></span>
+            </button>
+            <button class="source-card" type="button" data-source="tiktok">
+              <span class="source-icon" aria-hidden="true"><svg class="line-icon" viewBox="0 0 24 24" width="23" height="23"><path d="M14 4v11a3.7 3.7 0 1 1-3.7-3.7M14 4a5.4 5.4 0 0 0 5.3 5.1"/></svg></span>
+              <span class="source-copy"><strong>TikTok</strong><small>Videó- vagy megosztási link</small></span>
+            </button>
+            <button class="source-card" type="button" data-source="instagram">
+              <span class="source-icon" aria-hidden="true"><svg class="line-icon" viewBox="0 0 24 24" width="22" height="22"><rect x="3.2" y="3.2" width="17.6" height="17.6" rx="5"/><circle cx="12" cy="12" r="4"/><path d="M17.3 6.8v.1"/></svg></span>
+              <span class="source-copy"><strong>Instagram</strong><small>Reel vagy videóposzt</small></span>
+            </button>
+          </div>
+        </section>
       </div>
 
       <!-- keresési találatok rács -->
@@ -203,6 +224,7 @@
           <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M15 18l-6-6 6-6"/></svg>
         </button>
         <div class="ed-url" id="edUrl"></div>
+        <span class="editor-source" id="editorSource"></span>
       </header>
 
       <!-- Fő terület: bal=lejátszó, jobb=beállítások -->
@@ -218,9 +240,47 @@
             <h1 id="title" class="title-skeleton"></h1>
             <p id="uploader"></p>
           </div>
+          <section class="ed-timeline" id="edTimeline">
+            <div class="tl-controls">
+              <button id="playBtn" class="icon-btn play-btn" title="Lejátszás/szünet">
+                <svg id="playIcon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                  <path id="playPath" fill="currentColor" d="M8 5v14l11-7z"/>
+                </svg>
+              </button>
+              <span id="curTime" class="tl-time">0:00</span>
+              <span class="tl-time-sep">/</span>
+              <span id="totTime" class="tl-time muted">0:00</span>
+              <div class="preview-audio">
+                <button id="muteBtn" class="preview-control" type="button" aria-label="Előnézet némítása" aria-pressed="false">Hang be</button>
+                <input id="previewVolume" type="range" min="0" max="100" value="100" aria-label="Előnézet hangereje">
+                <button id="previewRetry" class="preview-control" type="button" hidden>Újratöltés</button>
+              </div>
+            </div>
+
+            <div class="timeline" id="timeline">
+              <div class="filmstrip" id="filmstrip"></div>
+              <div class="tl-dim tl-dim-left" id="dimLeft"></div>
+              <div class="tl-dim tl-dim-right" id="dimRight"></div>
+              <div class="tl-window" id="tlWindow">
+                <div class="tl-handle tl-handle-l" id="handleL" role="slider" tabindex="0" aria-label="Vágás kezdete" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+                  <span></span>
+                  <div class="tl-bubble" id="bubbleL">0:00</div>
+                </div>
+                <div class="tl-handle tl-handle-r" id="handleR" role="slider" tabindex="0" aria-label="Vágás vége" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+                  <span></span>
+                  <div class="tl-bubble" id="bubbleR">0:00</div>
+                </div>
+              </div>
+              <div class="playhead" id="playhead">
+                <div class="ph-bubble" id="phBubble">0:00</div>
+              </div>
+            </div>
+            <p class="tl-hint">A vágáshoz húzd a kijelölés két szélét.</p>
+          </section>
         </section>
 
-        <aside class="ed-side">
+        <aside class="ed-side" aria-labelledby="saveTitle">
+          <h2 id="saveTitle">Mentés</h2>
           <div class="side-block">
             <span class="block-label">Formátum</span>
             <div class="segment" id="formatToggle">
@@ -280,44 +340,6 @@
         </aside>
       </div>
 
-      <!-- Alsó timeline (csak videónál látszik) -->
-      <section class="ed-timeline" id="edTimeline">
-        <div class="tl-controls">
-          <button id="playBtn" class="icon-btn play-btn" title="Lejátszás/szünet">
-            <svg id="playIcon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-              <path id="playPath" fill="currentColor" d="M8 5v14l11-7z"/>
-            </svg>
-          </button>
-          <span id="curTime" class="tl-time">0:00</span>
-          <span class="tl-time-sep">/</span>
-          <span id="totTime" class="tl-time muted">0:00</span>
-          <div class="preview-audio">
-            <button id="muteBtn" class="preview-control" type="button" aria-label="Előnézet némítása" aria-pressed="false">Hang be</button>
-            <input id="previewVolume" type="range" min="0" max="100" value="100" aria-label="Előnézet hangereje">
-            <button id="previewRetry" class="preview-control" type="button" hidden>Újratöltés</button>
-          </div>
-        </div>
-
-        <div class="timeline" id="timeline">
-          <div class="filmstrip" id="filmstrip"></div>
-          <div class="tl-dim tl-dim-left" id="dimLeft"></div>
-          <div class="tl-dim tl-dim-right" id="dimRight"></div>
-          <div class="tl-window" id="tlWindow">
-            <div class="tl-handle tl-handle-l" id="handleL" role="slider" tabindex="0" aria-label="Vágás kezdete" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
-              <span></span>
-              <div class="tl-bubble" id="bubbleL">0:00</div>
-            </div>
-            <div class="tl-handle tl-handle-r" id="handleR" role="slider" tabindex="0" aria-label="Vágás vége" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
-              <span></span>
-              <div class="tl-bubble" id="bubbleR">0:00</div>
-            </div>
-          </div>
-          <div class="playhead" id="playhead">
-            <div class="ph-bubble" id="phBubble">0:00</div>
-          </div>
-        </div>
-        <p class="tl-hint">Húzd a füleket a kijelöléshez · a vágás a legközelebbi kulcsképkockához igazodik</p>
-      </section>
     </div>
 
     <script src="config.js"></script>
