@@ -17,7 +17,7 @@ class DownloadTests(unittest.TestCase):
         self.assertIn('download_ranges', trimmed)
 
     def test_expired_metadata_is_refreshed(self):
-        app._info_cache['https://example.org/video|'] = (0, {'title': 'old'})
+        app._info_cache['https://example.org/video|'] = (app.time.monotonic() - 601, {'title': 'old'})
         with patch.object(app, '_extract_info_once', return_value={'title':'fresh'}) as extract:
             self.assertEqual(app._extract_info('https://example.org/video')['title'], 'fresh')
             self.assertEqual(app._extract_info('https://example.org/video')['title'], 'fresh')
