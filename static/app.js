@@ -246,6 +246,9 @@ function setTab(tab) {
   }
 
   currentTab = tab;
+  const platformIcon = $("heroPlatformIcon");
+  platformIcon.innerHTML = sourceLogo(tab);
+  platformIcon.hidden = !platformIcon.firstElementChild;
   hideChannelProfile();
   channelReturnQuery = null;
   sourcePanel.hidden = tab !== "any";
