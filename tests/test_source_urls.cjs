@@ -1,0 +1,12 @@
+const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
+const source=fs.readFileSync('static/app.js','utf8');
+const code=source.slice(source.indexOf('function looksLikeUrl('),source.indexOf('// ---',source.indexOf('function sourceUrlError(')));
+const c={URL};vm.createContext(c);vm.runInContext(code,c);
+for(const url of ['https://www.youtube.com/watch?v=x','https://youtu.be/x','https://m.youtube.com/shorts/x']) assert.equal(c.sourceUrlError(url,'youtube'),'');
+for(const url of ['https://instagram.com/reel/x','instagram.com/p/x','https://www.instagram.com/reels/x']) assert.equal(c.sourceUrlError(url,'instagram'),'');
+for(const url of ['https://www.tiktok.com/@user/video/123','vm.tiktok.com/abc','https://vt.tiktok.com/abc']) assert.equal(c.sourceUrlError(url,'tiktok'),'');
+assert.ok(c.sourceUrlError('https://tiktok.com.example.org/abc','tiktok'));
+for(const [url,tab] of [['https://instagram.com/reel/x','youtube'],['https://youtube.com/watch?v=x','instagram'],['https://youtube.com.evil.test/x','youtube'],['https://notinstagram.com/x','instagram'],['ftp://youtube.com/x','youtube']]) assert.ok(c.sourceUrlError(url,tab));
+for(const url of ['https://youtube.com/watch?v=x','https://instagram.com/reel/x','https://vimeo.com/123']) assert.equal(c.sourceUrlError(url,'any'),'');
+assert.equal(c.looksLikeUrl('vimeo.com/123'),true);assert.equal(c.looksLikeUrl('relaxing music'),false);
+console.log('PASS: source tabs and universal tab validation');

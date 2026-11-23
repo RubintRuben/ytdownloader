@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+bin/
+tmp/
+.venv/
+venv/
+*.log
+.DS_Store
+.deps_ok
+tmp_s.*
+# Instagram/YouTube cookie-fájlok — SOHA ne kerüljenek verziókövetésbe / publikus repóba (érzékeny!)
+ig_cookies.txt
+ig_session_cookies.txt
+ig_session_master.txt
+yt_session_master.txt
+www.youtube.com_cookies.txt
+# PyInstaller build-melléktermékek
+build/
+dist/
+work/
+*cookies*.txt
+*session*.txt

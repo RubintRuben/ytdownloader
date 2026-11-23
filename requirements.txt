@@ -1,0 +1,9 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+# A yt-dlp-t MINDIG a legfrissebbre tesszük — a YouTube gyakran változik, és a régi
+# verziók elavulnak ("Requested format is not available"). Ne fixáld régi verzióra!
+yt-dlp[default,curl-cffi]>=2026.10.26
+httpx==0.28.1
+# Natív, önálló ablak (böngésző helyett). Windowson a beépített WebView2 (Edge) motort
+# használja, így nem nő nagyra az EXE.
+pywebview==6.2.1
