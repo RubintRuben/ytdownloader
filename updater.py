@@ -265,14 +265,30 @@ $ErrorActionPreference = 'Stop'
 $backup = "$Staged.previous"
 $replaced = $false
 function Start-Downloader {
-    $env:PYINSTALLER_RESET_ENVIRONMENT = '1'
-    Start-Process -FilePath $Target -WorkingDirectory ([IO.Path]::GetDirectoryName($Target))
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $Target
+    $start.WorkingDirectory = [IO.Path]::GetDirectoryName($Target)
+    $start.UseShellExecute = $false
+    $start.EnvironmentVariables['PYINSTALLER_RESET_ENVIRONMENT'] = '1'
+    [void][Diagnostics.Process]::Start($start)
+}
+function Get-Application {
+    try { [Diagnostics.Process]::GetProcessById($AppPid) }
+    catch [ArgumentException] { $null }
 }
 try {
-    if ((Get-FileHash -LiteralPath $Staged -Algorithm SHA256).Hash -ne $Digest) {
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    $stream = [IO.File]::OpenRead($Staged)
+    try {
+        $hash = [BitConverter]::ToString($hasher.ComputeHash($stream)).Replace('-', '')
+    } finally {
+        $stream.Dispose()
+        $hasher.Dispose()
+    }
+    if ($hash -ne $Digest) {
         throw 'The staged update failed validation.'
     }
-    $application = Get-Process -Id $AppPid -ErrorAction SilentlyContinue
+    $application = Get-Application
     if ($application -and -not $application.WaitForExit(90000)) {
         throw 'Downloader did not exit before the update timeout.'
     }
@@ -282,20 +298,20 @@ try {
             $replaced = $true
             break
         } catch [System.IO.IOException] {
-            Start-Sleep -Milliseconds 250
+            [Threading.Thread]::Sleep(250)
         }
     }
     if (-not $replaced) { throw 'Windows kept the executable locked.' }
     Start-Downloader
-    Remove-Item -LiteralPath $backup -ErrorAction SilentlyContinue
+    try { [IO.File]::Delete($backup) } catch {}
 } catch {
-    Add-Content -LiteralPath $LogPath -Value "Update failed: $($_.Exception.Message)" -ErrorAction SilentlyContinue
-    if ($replaced -and (Test-Path -LiteralPath $backup)) {
+    try { [IO.File]::AppendAllText($LogPath, "Update failed: $($_.Exception.Message)`r`n") } catch {}
+    if ($replaced -and [IO.File]::Exists($backup)) {
         [IO.File]::Replace($backup, $Target, $null, $false)
     }
-    if (-not (Get-Process -Id $AppPid -ErrorAction SilentlyContinue)) { Start-Downloader }
+    if (-not (Get-Application)) { Start-Downloader }
 } finally {
-    Remove-Item -LiteralPath $Staged -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $PSCommandPath -ErrorAction SilentlyContinue
+    try { [IO.File]::Delete($Staged) } catch {}
+    try { [IO.File]::Delete($PSCommandPath) } catch {}
 }
 """
