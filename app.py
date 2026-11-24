@@ -53,7 +53,9 @@ from yt_dlp.networking import Request as MediaRequest
 from yt_dlp.networking.exceptions import HTTPError as MediaHTTPError, RequestError as MediaRequestError
 from yt_dlp.networking.impersonate import ImpersonateTarget
 from yt_dlp.utils import download_range_func
+import backgrounds
 import library as media_library
+import theme_media
 import mcp_server
 import yt_web
 from updater import DesktopUpdater
@@ -91,8 +93,8 @@ SETTINGS_FILE = USER_DATA_DIR / "settings.json"
 LOG_FILE = USER_DATA_DIR / "downloader.log"
 _SHORTCUT_ANSWERED_KEY = "shortcut_answered"
 _SHORTCUT_CREATED_KEY = "shortcut_created"
-_THEMES = {"light", "dark", "aurora", "ocean", "ember", "orchid", "graphite", "blackhole", "deepsea", "rain", "custom"}
-_ICON_THEME = {"blackhole": "graphite", "deepsea": "ocean", "rain": "aurora", "custom": "dark"}
+_THEMES = {"light", "dark", "aurora", "ocean", "ember", "orchid", "graphite", "blackhole", "minecraft", "rain", "custom"}
+_ICON_THEME = {"blackhole": "graphite", "minecraft": "aurora", "rain": "ocean", "custom": "dark"}
 SERVER_FILE = USER_DATA_DIR / "server.json"
 BACKGROUND_DIR = USER_DATA_DIR / "backgrounds"
 _library = media_library.Library(USER_DATA_DIR)
@@ -1825,17 +1827,20 @@ def _attach_subtitles(job: dict, output: Path, ffmpeg: Path | None) -> Path:
             raise RuntimeError("missing subtitle")
         offset = int(float(meta.get("start") or 0) * 1000)
         limit = int(float(meta.get("end") or 0) * 1000) or None
-        lines, index = [], 0
+        lines, index, shifted = [], 0, []
         for start, end, text in _subtitle_cues(entry):
             if end <= offset or (limit and start >= limit):
                 continue
             index += 1
             start, end = max(0, start - offset), (min(end, limit) if limit else end) - offset
+            shifted.append((start, end, text))
             lines += [str(index), f"{_srt_time(start)} --> {_srt_time(end)}", text, ""]
         if not lines:
             raise RuntimeError("empty subtitle")
         srt = output.with_suffix(f".{lang}.srt")
         srt.write_text("\n".join(lines), encoding="utf-8")
+        if mode == "burn" and output.suffix == ".mp4":
+            return _burn_subtitles(job, output, ffmpeg, shifted, meta.get("subs_style") or {}, srt)
         if mode == "srt" or output.suffix != ".mp4":
             job["extra_files"] = [str(srt)]
             return output
@@ -1854,6 +1859,78 @@ def _attach_subtitles(job: dict, output: Path, ffmpeg: Path | None) -> Path:
         _log(f"Subtitle step failed: {type(exc).__name__}: {str(exc)[:120]}")
         job["warning"] = "A felirat nem került bele (a videó elkészült)."
         return output
+
+
+_SUB_FONTS = {"sans": "Segoe UI", "mono": "Consolas", "serif": "Georgia", "casual": "Comic Sans MS",
+              "smallcaps": "Segoe UI"}
+
+
+def _ass_color(hex_color: str, opacity: float = 1.0) -> str:
+    """#RRGGBB + opacity → ASS &HAABBGGRR (alpha 00 = opaque)."""
+    value = hex_color.lstrip("#") if re.fullmatch(r"#?[0-9a-fA-F]{6}", hex_color or "") else "ffffff"
+    alpha = round((1 - max(0.0, min(1.0, opacity))) * 255)
+    return f"&H{alpha:02X}{value[4:6]}{value[2:4]}{value[0:2]}".upper()
+
+
+def _ass_time(ms: float) -> str:
+    cs = max(0, int(round(ms / 10)))
+    return f"{cs // 360000}:{cs // 6000 % 60:02d}:{cs // 100 % 60:02d}.{cs % 100:02d}"
+
+
+def build_ass(cues: list[tuple[int, int, str]], style: dict, width: int, height: int) -> str:
+    """The same look as the app's preview overlay (size, colours, box, edge, font)."""
+    scale = max(0.5, min(3.0, float(style.get("size") or 100) / 100))
+    font_size = max(12, round(height * 0.052 * scale))
+    font = _SUB_FONTS.get(style.get("font"), "Segoe UI")
+    primary = _ass_color(style.get("color") or "#ffffff")
+    bg_opacity = max(0, min(100, int(style.get("bgOpacity", 75)))) / 100
+    edge = style.get("edge") or "none"
+    if bg_opacity > 0.02:
+        box = _ass_color(style.get("bg") or "#080808", bg_opacity)
+        border_style, outline_colour, back_colour = 3, box, box
+        outline, shadow = round(font_size * 0.12, 1), 0
+    else:
+        border_style, outline_colour, back_colour = 1, "&H00000000", "&H80000000"
+        outline = {"outline": 2.2, "raised": 0.6, "depressed": 0.6}.get(edge, 0)
+        shadow = {"shadow": 2.5, "raised": 1.5}.get(edge, 0)
+    header = [
+        "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}",
+        "ScaledBorderAndShadow: yes", "WrapStyle: 0", "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, "
+        "Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, "
+        "MarginR, MarginV, Encoding",
+        f"Style: Default,{font},{font_size},{primary},{primary},{outline_colour},{back_colour},0,0,0,0,100,100,0,0,"
+        f"{border_style},{outline},{shadow},2,{round(width * 0.04)},{round(width * 0.04)},{round(height * 0.07)},1",
+        "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+    events = []
+    for start, end, text in cues:
+        clean = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", text).replace("{", "(").replace("}", ")")
+        clean = re.sub(r"[ \t\u00a0]{2,}", " ", clean).strip().replace("\n", r"\N")
+        if clean:
+            events.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Default,,0,0,0,,{clean}")
+    return "\n".join(header + events) + "\n"
+
+
+def _burn_subtitles(job: dict, output: Path, ffmpeg: Path, cues, style: dict, srt: Path) -> Path:
+    probe = media_library.probe_media(ffmpeg, output)
+    width, height = probe.get("width") or 1920, probe.get("height") or 1080
+    folder = output.parent
+    (folder / "subs.ass").write_text(build_ass(cues, style, width, height), encoding="utf-8")
+    burned = folder / "burned.mp4"
+    fonts = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "Fonts").replace("\\", "/").replace(":", "\\:")
+    # Relative file name and cwd: no Windows path escaping inside the filter graph.
+    command = [str(ffmpeg), "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", output.name,
+               "-vf", f"ass=subs.ass:fontsdir='{fonts}'", "-c:v", "libx264", "-preset", "veryfast", "-crf", "19",
+               "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", burned.name]
+    result = subprocess.run(command, cwd=str(folder), capture_output=True, text=True, errors="replace",
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    if result.returncode or not burned.exists():
+        raise RuntimeError("burn failed: " + result.stderr[-200:])
+    output.unlink(missing_ok=True)
+    srt.unlink(missing_ok=True)
+    return burned
 
 
 def _auto_save(job_id: str, job: dict, ffmpeg: Path | None) -> None:
@@ -1909,7 +1986,7 @@ _LANG_RE = re.compile(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8}){0,2}")
 async def start_download(url: str, format: str = "mp4", quality: str = "", start: float = 0.0, end: float = 0.0,
                          browser: str = "", source: str = "any", audio_lang: str = "", subs: str = "",
                          subs_auto: bool = False, subs_mode: str = "embed", auto_save: bool | None = None,
-                         origin: str = "app") -> dict:
+                         origin: str = "app", subs_style: dict | None = None) -> dict:
     validate_source_url(url, source)
     if format not in ("mp3", "mp4"):
         raise HTTPException(400, "Érvénytelen formátum.")
@@ -1920,7 +1997,7 @@ async def start_download(url: str, format: str = "mp4", quality: str = "", start
     for value in (audio_lang, subs):
         if value and not _LANG_RE.fullmatch(value):
             raise HTTPException(400, "Érvénytelen nyelvkód.")
-    if subs_mode not in ("embed", "srt"):
+    if subs_mode not in ("embed", "srt", "burn"):
         raise HTTPException(400, "Érvénytelen feliratmód.")
 
     is_ig = is_valid_instagram_url(url)
@@ -1987,6 +2064,8 @@ async def start_download(url: str, format: str = "mp4", quality: str = "", start
             "subs": subs,
             "subs_auto": subs_auto,
             "subs_mode": subs_mode,
+            "subs_style": {k: v for k, v in (subs_style or {}).items()
+                           if k in ("size", "color", "bg", "bgOpacity", "font", "edge")},
         },
     }
 
@@ -2014,9 +2093,14 @@ async def api_prepare(
     subs: str = "",
     subs_auto: bool = False,
     subs_mode: str = "embed",
+    subs_style: str = "",
 ):
+    try:
+        style = json.loads(subs_style) if subs_style and len(subs_style) < 600 else {}
+    except ValueError:
+        style = {}
     return await start_download(url, format, quality, start, end, browser, source, audio_lang, subs,
-                                subs_auto, subs_mode)
+                                subs_auto, subs_mode, subs_style=style if isinstance(style, dict) else {})
 
 
 @app.get("/api/progress/{job_id}")
@@ -2157,9 +2241,9 @@ _DEFAULTS = {
     "default_format": "mp4",
     "default_quality": "1080",
     "animations": "high",           # high | low | off
-    "background": "",               # egyéni háttér fájlneve
-    "background_kind": "",          # image | video
-    "background_dim": 55,
+    "background_dim": 35,           # az animált témák sötétítése
+    "scene_effects": True,          # kurzorra reagáló effektek az animált témákon
+    "mcp_blocked": [],              # letiltott AI-k (claude, openai, gemini, kimi, grok, deepseek)
 }
 
 
@@ -2175,7 +2259,7 @@ def _update_settings(changes: dict) -> dict:
     with _settings_lock:
         stored = _load_settings()
         for key, value in changes.items():
-            if key not in _DEFAULTS or key in ("background", "background_kind"):
+            if key not in _DEFAULTS:
                 continue
             if key == "save_mode" and value not in ("auto", "ask"):
                 continue
@@ -2189,6 +2273,12 @@ def _update_settings(changes: dict) -> dict:
                     continue
             if key == "background_dim":
                 value = max(0, min(90, int(value)))
+            if key == "scene_effects":
+                value = bool(value)
+            if key == "mcp_blocked":
+                if not isinstance(value, list):
+                    continue
+                value = sorted({str(v) for v in value if str(v) in mcp_server.AI_NAMES})
             stored[key] = value
         _save_settings(stored)
     return _app_settings()
@@ -2245,7 +2335,9 @@ async def api_mcp_approve(approval_id: str, allow: bool = False):
 async def api_pulse():
     """Cheap poll for the UI: background jobs (e.g. started by AI) and pending approvals."""
     active = sum(1 for job in _jobs.values() if job["status"] in ("running", "starting", "canceling"))
-    return {"active": active, "jobs": len(_jobs), "approvals": _approvals.listing(), "library": _library.rev}
+    connected = [{"id": s["id"], "ai": s["ai"], "label": s["label"]} for s in _mcp_sessions.listing() if s["connected"]]
+    return {"active": active, "jobs": len(_jobs), "approvals": _approvals.listing(), "library": _library.rev,
+            "ai": connected, "mcpMode": _app_settings()["mcp_mode"]}
 
 
 # ----------------------------------------------------------------------------
@@ -2417,37 +2509,157 @@ async def api_library_edit(item_id: str, request: Request):
 
 
 # ----------------------------------------------------------------------------
-# Egyéni háttér (kép vagy videó)
+# Saját hátterek (kép, videó, Wallpaper Engine) és az animált témák videói
 # ----------------------------------------------------------------------------
 
-_BACKGROUND_TYPES = {".jpg": "image", ".jpeg": "image", ".png": "image", ".webp": "image", ".gif": "image",
-                     ".mp4": "video", ".webm": "video", ".mov": "video", ".m4v": "video"}
+_backgrounds = backgrounds.Backgrounds(BACKGROUND_DIR, lambda: _load_settings(), lambda s: _save_settings(s),
+                                       lambda: _ensure_ffmpeg_on_path(), _settings_lock)
+_theme_videos = theme_media.ThemeVideos(USER_DATA_DIR / "theme-videos", _base_opts,
+                                        lambda: _ensure_ffmpeg_on_path(), lambda m: _log(m))
 
 
-def set_custom_background(path: str) -> dict:
-    source = Path(path)
-    kind = _BACKGROUND_TYPES.get(source.suffix.lower())
-    if not kind or not source.is_file() or source.stat().st_size > 400 * 1024 * 1024:
-        raise ValueError("Csak kép (jpg, png, webp, gif) vagy videó (mp4, webm, mov) lehet, legfeljebb 400 MB.")
-    BACKGROUND_DIR.mkdir(parents=True, exist_ok=True)
-    for old in BACKGROUND_DIR.iterdir():
-        old.unlink(missing_ok=True)
-    target = BACKGROUND_DIR / ("background" + source.suffix.lower())
-    shutil.copyfile(source, target)
-    with _settings_lock:
-        stored = _load_settings()
-        stored.update({"background": target.name, "background_kind": kind, "theme": "custom"})
-        _save_settings(stored)
-    return _app_settings()
+def _valid_theme(theme) -> bool:
+    if not isinstance(theme, str):
+        return False
+    if theme.startswith("custom:"):
+        return _backgrounds.get(theme[7:]) is not None
+    return theme in (_THEMES | {"auto"})
 
 
-@app.get("/api/background")
-async def api_background():
-    name = _app_settings()["background"]
-    path = BACKGROUND_DIR / name if name else None
-    if not path or not path.is_file():
-        raise HTTPException(404, "Nincs egyéni háttér.")
-    return FileResponse(path, headers={"Cache-Control": "no-store"})
+def _public_theme(theme: dict) -> dict:
+    return {**{k: v for k, v in theme.items() if k not in ("properties",)},
+            "hasThumb": _backgrounds.thumb_path(theme["id"]) is not None}
+
+
+@app.get("/api/custom-themes")
+async def api_custom_themes():
+    themes = await asyncio.to_thread(_backgrounds.themes)
+    return {"themes": [_public_theme(t) for t in themes]}
+
+
+@app.post("/api/custom-themes/{theme_id}")
+async def api_custom_theme_update(theme_id: str, request: Request):
+    try:
+        return _public_theme(await asyncio.to_thread(_backgrounds.update, theme_id, await request.json()))
+    except KeyError as exc:
+        raise HTTPException(404, "Nincs ilyen saját téma.") from exc
+
+
+@app.post("/api/custom-themes/{theme_id}/delete")
+async def api_custom_theme_delete(theme_id: str):
+    return {"ok": await asyncio.to_thread(_backgrounds.delete, theme_id)}
+
+
+@app.get("/api/custom-themes/{theme_id}/media")
+async def api_custom_theme_media(theme_id: str):
+    theme = _backgrounds.get(theme_id)
+    path = _backgrounds.media_path(theme) if theme else None
+    if not path:
+        raise HTTPException(404, "A háttérfájl nem található.")
+    return FileResponse(path, headers={"Cache-Control": "max-age=3600"})
+
+
+@app.get("/api/custom-themes/{theme_id}/thumb")
+async def api_custom_theme_thumb(theme_id: str):
+    path = _backgrounds.thumb_path(theme_id)
+    if not path:
+        raise HTTPException(404, "Nincs előnézet.")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "max-age=600"})
+
+
+def _wallpaper_file(path: Path, entry: bool, properties: dict, muted: bool):
+    headers = {"Cache-Control": "no-store", "Content-Security-Policy": "frame-ancestors 'self'"}
+    if entry and path.suffix.lower() in (".html", ".htm"):
+        html = path.read_text(encoding="utf-8", errors="replace")
+        return Response(backgrounds.inject_bridge(html, properties or {}, muted),
+                        media_type="text/html; charset=utf-8", headers=headers)
+    return FileResponse(path, headers=headers)
+
+
+@app.get("/api/custom-themes/{theme_id}/files/{relative:path}")
+async def api_custom_theme_files(theme_id: str, relative: str):
+    """Wallpaper Engine web/scene files; web pages run in a sandboxed iframe."""
+    theme = _backgrounds.get(theme_id)
+    if not theme or theme["kind"] not in ("web", "scene"):
+        raise HTTPException(404, "Nincs ilyen háttér.")
+    path = _backgrounds.web_file(theme, relative or theme["file"])
+    if not path:
+        raise HTTPException(404, "A fájl nem található.")
+    return _wallpaper_file(path, theme["kind"] == "web" and Path(relative) == Path(theme["file"]),
+                           theme.get("properties") or {}, not theme.get("sound"))
+
+
+@app.get("/api/theme-video/{scene}/files/{relative:path}")
+async def api_theme_files(scene: str, relative: str):
+    if scene not in theme_media.THEME_VIDEOS:
+        raise HTTPException(404, "Ismeretlen téma.")
+    path = _theme_videos.asset(scene, relative)
+    if not path:
+        raise HTTPException(404, "A fájl nem található.")
+    custom = _theme_videos.override(scene) or {}
+    return _wallpaper_file(path, custom.get("kind") == "web" and Path(relative) == Path(custom.get("file", "")),
+                           custom.get("properties") or {}, True)
+
+
+@app.post("/api/theme-video/{scene}/wallpaper")
+async def api_theme_wallpaper(scene: str, request: Request):
+    """Use an installed Wallpaper Engine wallpaper as an animated theme's background."""
+    if scene not in theme_media.THEME_VIDEOS:
+        raise HTTPException(404, "Ismeretlen téma.")
+    target = Path(str((await request.json()).get("path") or ""))
+    if not any(root.resolve() in target.resolve().parents for root in backgrounds.steam_libraries()):
+        raise HTTPException(400, "Csak a Steam-könyvtárban lévő hátterek választhatók innen.")
+    try:
+        return await asyncio.to_thread(_theme_videos.install_wallpaper, scene, target)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/wallpaper-engine")
+async def api_wallpaper_engine():
+    return {"items": await asyncio.to_thread(backgrounds.discover_wallpapers)}
+
+
+@app.get("/api/wallpaper-engine/preview")
+async def api_wallpaper_engine_preview(path: str = Query(..., max_length=1000)):
+    target = Path(path)
+    allowed = any(root.resolve() in target.resolve().parents for root in backgrounds.steam_libraries())
+    if not allowed or target.suffix.lower() not in (".gif", ".jpg", ".jpeg", ".png", ".webp") or not target.is_file():
+        raise HTTPException(404, "Nincs előnézet.")
+    return FileResponse(target, headers={"Cache-Control": "max-age=3600"})
+
+
+@app.post("/api/wallpaper-engine/import")
+async def api_wallpaper_engine_import(request: Request):
+    path = str((await request.json()).get("path") or "")
+    target = Path(path)
+    if not any(root.resolve() in target.resolve().parents for root in backgrounds.steam_libraries()):
+        raise HTTPException(400, "Csak a Steam-könyvtárban lévő hátterek importálhatók innen.")
+    try:
+        return _public_theme(await asyncio.to_thread(_backgrounds.add_wallpaper_engine, path))
+    except (OSError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/theme-video/{scene}/status")
+async def api_theme_video_status(scene: str, prepare: bool = False):
+    if scene not in theme_media.THEME_VIDEOS:
+        raise HTTPException(404, "Ismeretlen téma.")
+    return _theme_videos.ensure(scene) if prepare else _theme_videos.status(scene)
+
+
+@app.get("/api/theme-video/{scene}")
+async def api_theme_video(scene: str):
+    if scene not in theme_media.THEME_VIDEOS or not _theme_videos.path(scene).is_file():
+        raise HTTPException(404, "A háttérvideó még nincs kész.")
+    return FileResponse(_theme_videos.path(scene), media_type="video/mp4", headers={"Cache-Control": "max-age=3600"})
+
+
+@app.post("/api/theme-video/{scene}/reset")
+async def api_theme_video_reset(scene: str):
+    if scene not in theme_media.THEME_VIDEOS:
+        raise HTTPException(404, "Ismeretlen téma.")
+    return await asyncio.to_thread(_theme_videos.reset, scene)
 
 
 # ----------------------------------------------------------------------------
@@ -2620,8 +2832,22 @@ _mcp_router, _approvals = mcp_server.create_router(
     {"search": _mcp_search, "info": _mcp_info, "download": _mcp_download, "jobs": _mcp_jobs,
      "cancel": _mcp_cancel, "library": _mcp_library, "edit": _mcp_edit, "delete": _mcp_delete,
      "open": _mcp_open},
-    _mcp_describe, lambda: _app_settings()["mcp_mode"], _mcp_token, APP_VERSION)
+    _mcp_describe, lambda: _app_settings()["mcp_mode"], _mcp_token, APP_VERSION,
+    blocked=lambda: _app_settings()["mcp_blocked"])
 app.include_router(_mcp_router)
+_mcp_sessions = _mcp_router.sessions
+
+
+@app.get("/api/mcp/sessions")
+async def api_mcp_sessions():
+    settings = _app_settings()
+    return {"sessions": _mcp_sessions.listing(), "mode": settings["mcp_mode"], "blocked": settings["mcp_blocked"],
+            "log": _approvals.log[:30], "names": mcp_server.AI_NAMES}
+
+
+@app.post("/api/mcp/sessions/{session_id}/disconnect")
+async def api_mcp_disconnect(session_id: str):
+    return {"ok": _mcp_sessions.revoke(session_id)}
 
 
 def _write_server_file(url: str | None = None) -> None:
@@ -3175,13 +3401,37 @@ class _NativeApi:
         return folder
 
     def pick_background(self) -> dict:
+        """Add a custom theme from an image, a video or a Wallpaper Engine project.json."""
         result = self._window.create_file_dialog(
             self._open_dialog_type(),
-            file_types=("Képek és videók (*.jpg;*.jpeg;*.png;*.webp;*.gif;*.mp4;*.webm;*.mov;*.m4v)",))
+            file_types=("Képek, videók, Wallpaper Engine (*.jpg;*.jpeg;*.png;*.webp;*.gif;*.mp4;*.webm;*.mov;*.m4v;*.mkv;project.json)",
+                        "Minden fájl (*.*)"))
         if not result:
             return {"ok": False}
+        path = result if isinstance(result, str) else result[0]
         try:
-            return {"ok": True, "settings": set_custom_background(result if isinstance(result, str) else result[0])}
+            if Path(path).name.lower() == "project.json":
+                theme = _backgrounds.add_wallpaper_engine(path)
+            else:
+                theme = _backgrounds.add_file(path)
+            return {"ok": True, "theme": _public_theme(theme)}
+        except (OSError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pick_theme_video(self, scene: str) -> dict:
+        """Replace an animated theme's background with a video or a Wallpaper Engine project.json."""
+        if scene not in theme_media.THEME_VIDEOS:
+            return {"ok": False}
+        result = self._window.create_file_dialog(
+            self._open_dialog_type(),
+            file_types=("Videó vagy Wallpaper Engine (*.mp4;*.webm;*.mov;*.m4v;*.mkv;project.json)", "Minden fájl (*.*)"))
+        if not result:
+            return {"ok": False}
+        path = Path(result if isinstance(result, str) else result[0])
+        try:
+            if path.name.lower() == "project.json":
+                return {"ok": True, "status": _theme_videos.install_wallpaper(scene, path.parent)}
+            return {"ok": True, "status": _theme_videos.install_custom(scene, path)}
         except (OSError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -3199,10 +3449,11 @@ class _NativeApi:
 
     def theme(self) -> str | None:
         theme = _load_settings().get("theme")
-        return theme if isinstance(theme, str) and theme in (_THEMES | {"auto"}) else None
+        theme = "minecraft" if theme == "deepsea" else theme
+        return theme if _valid_theme(theme) else None
 
     def set_theme(self, theme: str) -> None:
-        if isinstance(theme, str) and theme in (_THEMES | {"auto"}):
+        if _valid_theme(theme):
             with self._theme_lock:
                 settings = _load_settings()
                 settings["theme"] = theme

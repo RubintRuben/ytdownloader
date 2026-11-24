@@ -27,6 +27,7 @@
   let activeKey = "";        // a betöltött felirat azonosítója ("m:en" / "a:hu")
   let loadSeq = 0;
   let frame = 0;
+  let forcedByDownload = false;
 
   // --- felirat-források -----------------------------------------------------
   function tracks() {
@@ -292,6 +293,12 @@
     reset() { media = null; cues = []; activeKey = ""; overlay.replaceChildren(); lastHtml = ""; closeMenu(); },
     audioChanged() { reloadPreviewAudio(); },
     toggleCaptions() { if (tracks().length) setCaptions(!prefs.captions); },
+    // a beégetett felirat ugyanazt a stílust kapja, mint az előnézet
+    style() { return { ...prefs.style }; },
+    showDownloadTrack(key) {
+      if (key) { forcedByDownload = true; setCaptions(true, key); }
+      else if (forcedByDownload) { forcedByDownload = false; setCaptions(false); }
+    },
   };
   video.addEventListener("loadeddata", () => { video.playbackRate = prefs.speed; });
 })();

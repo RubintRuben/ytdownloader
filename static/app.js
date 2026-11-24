@@ -1433,6 +1433,8 @@ function setAudioLang(lang, fromPlayer = false) {
 $("audioSelect").addEventListener("change", (event) => setAudioLang(event.target.value));
 $("subsSelect").addEventListener("change", () => {
   $("subsMode").hidden = currentFormat === "mp3" || !$("subsSelect").value;
+  // az előnézet pontosan azt a feliratot mutatja, ami a fájlba kerül
+  window.playerHooks?.showDownloadTrack($("subsSelect").value);
 });
 $("subsMode").addEventListener("click", (event) => {
   const button = event.target.closest(".seg");
@@ -1445,7 +1447,9 @@ function subtitleParams(params) {
   if (!value || $("subsBlock").hidden) return;
   params.set("subs", value.slice(2));
   params.set("subs_auto", String(value.startsWith("a:")));
-  params.set("subs_mode", currentFormat === "mp3" ? "srt" : ($("subsMode").querySelector(".active")?.dataset.mode || "embed"));
+  const mode = currentFormat === "mp3" ? "srt" : ($("subsMode").querySelector(".active")?.dataset.mode || "burn");
+  params.set("subs_mode", mode);
+  if (mode === "burn") params.set("subs_style", JSON.stringify(window.playerHooks?.style?.() || {}));
 }
 
 // Kézzel beírható vágási időpontok (pl. 1:23, 1:23,5 vagy 83.5)
@@ -1757,7 +1761,10 @@ function paramsFromListItem(it) {
   const trimmed = (it.start > 0.01) || (it.end > 0 && it.end < dur - 0.01);
   if (trimmed && it.end > it.start) { p.set("start", String(it.start)); p.set("end", String(it.end)); }
   if (it.audioLang) p.set("audio_lang", it.audioLang);
-  if (it.subs) { p.set("subs", it.subs); p.set("subs_auto", String(!!it.subsAuto)); p.set("subs_mode", it.subsMode || "embed"); }
+  if (it.subs) {
+    p.set("subs", it.subs); p.set("subs_auto", String(!!it.subsAuto)); p.set("subs_mode", it.subsMode || "burn");
+    if ((it.subsMode || "burn") === "burn") p.set("subs_style", JSON.stringify(window.playerHooks?.style?.() || {}));
+  }
   return p;
 }
 
@@ -2067,7 +2074,7 @@ function currentEditorAsItem() {
     audioLang: $("audioBlock").hidden ? "" : audioLang,
     subs: $("subsSelect").value ? $("subsSelect").value.slice(2) : "",
     subsAuto: $("subsSelect").value.startsWith("a:"),
-    subsMode: $("subsMode").querySelector(".active")?.dataset.mode || "embed",
+    subsMode: $("subsMode").querySelector(".active")?.dataset.mode || "burn",
   };
 }
 
@@ -2412,6 +2419,7 @@ async function pulse() {
     if (lastLibraryRev !== null && data.library !== lastLibraryRev) window.galleryHooks?.refresh();
     lastLibraryRev = data.library;
     renderApprovals(data.approvals || []);
+    renderAiStatus(data.ai || [], data.mcpMode);
   } catch { /* the server restarts during updates */ }
 }
 setInterval(pulse, 1500);
@@ -2428,7 +2436,7 @@ function renderApprovals(list) {
     const card = document.createElement("div");
     card.className = "approval-card";
     card.innerHTML = `
-      <div class="approval-head"><span class="ai-tag">AI</span><strong>Engedélyt kér</strong></div>
+      <div class="approval-head">${aiLogo(item.ai)}<strong>${escapeHtml(aiName(item.ai, item.client))} engedélyt kér</strong></div>
       <p></p>
       <div class="approval-actions">
         <button type="button" class="btn-list" data-allow="false">Elutasítás</button>
@@ -2530,3 +2538,99 @@ document.addEventListener("keydown", e => {
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
   }
 });
+
+// --- AI-kapcsolatok: állapot az oldalsáv tetején, részletek egy panelen ---
+const AI_LABELS = { claude: "Claude", openai: "OpenAI", gemini: "Gemini", kimi: "Kimi", grok: "Grok", deepseek: "DeepSeek" };
+function aiName(ai, client) { return AI_LABELS[ai] || client || "AI"; }
+function aiLogo(ai, cls = "ai-logo") {
+  return AI_LABELS[ai] ? `<img class="${cls}" src="ai/${ai}.png" alt="${AI_LABELS[ai]}">`
+    : `<span class="${cls} generic">AI</span>`;
+}
+let aiStatusKey = "";
+function renderAiStatus(list, mode) {
+  const key = JSON.stringify([list.map(x => x.id + x.ai), mode]);
+  if (key === aiStatusKey) return;
+  aiStatusKey = key;
+  const ais = [...new Set(list.map(x => x.ai))];
+  $("aiLogos").innerHTML = ais.length ? ais.slice(0, 3).map(ai => aiLogo(ai)).join("")
+    : `<span class="ai-logo generic">AI</span>`;
+  $("aiStatusTitle").textContent = ais.length ? ais.map(ai => aiName(ai)).join(", ") : "AI";
+  $("aiStatusSub").textContent = mode === "off" ? "Kikapcsolva"
+    : list.length ? `${list.length} csatlakozva · ${mode === "full" ? "teljes hozzáférés" : "engedéllyel"}` : "Nincs csatlakozva";
+  const button = $("aiStatus");
+  button.classList.toggle("connected", list.length > 0 && mode !== "off");
+  button.classList.toggle("off", mode === "off");
+  button.classList.toggle("full", mode === "full");
+  if (!$("aiPopover").hidden) loadAiPopover();
+}
+
+async function loadAiPopover() {
+  let data;
+  try { data = await (await fetch(`${API}/api/mcp/sessions`)).json(); } catch { return; }
+  const modeNames = { off: "Kikapcsolva", ask: "Engedélyt kér", full: "Teljes hozzáférés" };
+  $("aiModeChip").textContent = modeNames[data.mode] || "";
+  $("aiModeChip").dataset.mode = data.mode;
+  const since = (t) => {
+    const minutes = Math.round((Date.now() / 1000 - t) / 60);
+    return minutes < 1 ? "most" : minutes < 60 ? `${minutes} perce` : `${Math.round(minutes / 60)} órája`;
+  };
+  const sessions = data.sessions || [];
+  $("aiSessions").replaceChildren(...(sessions.length ? sessions.map(s => {
+    const row = document.createElement("div");
+    row.className = "ai-session" + (s.connected ? " live" : "");
+    row.innerHTML = `${aiLogo(s.ai, "ai-logo big")}
+      <div class="ai-session-info"><strong></strong><small></small></div>
+      <button type="button" class="btn-list compact">Lekapcsolás</button>`;
+    row.querySelector("strong").textContent = `${aiName(s.ai)} · ${s.label}${s.version ? " " + s.version : ""}`;
+    row.querySelector("small").textContent = `${s.connected ? "Csatlakozva" : "Inaktív"} · ${since(s.started)} óta · ${s.calls} művelet${s.last ? " · utolsó: " + s.last : ""}`;
+    row.querySelector("button").addEventListener("click", async () => {
+      await fetch(`${API}/api/mcp/sessions/${s.id}/disconnect`, { method: "POST" });
+      toast(`${aiName(s.ai)} lekapcsolva.`);
+      aiStatusKey = "";
+      loadAiPopover();
+    });
+    return row;
+  }) : [Object.assign(document.createElement("p"), { className: "pane-hint", textContent: "Most egy AI sincs csatlakozva. A Beállítások → AI · MCP részen találod a csatlakozáshoz szükséges parancsot." })]));
+  const blocked = new Set(data.blocked || []);
+  $("aiToggles").replaceChildren(...Object.keys(AI_LABELS).map(ai => {
+    const label = document.createElement("label");
+    label.className = "ai-toggle" + (blocked.has(ai) ? " blocked" : "");
+    label.title = blocked.has(ai) ? "Letiltva – kattints az engedélyezéshez" : "Engedélyezve – kattints a letiltáshoz";
+    label.innerHTML = `${aiLogo(ai)}<input type="checkbox" ${blocked.has(ai) ? "" : "checked"}><span>${AI_LABELS[ai]}</span>`;
+    label.querySelector("input").addEventListener("change", async (event) => {
+      const next = new Set(blocked);
+      if (event.target.checked) next.delete(ai); else next.add(ai);
+      await window.updateAppSettings?.({ mcp_blocked: [...next] });
+      if (!event.target.checked) {
+        for (const s of sessions.filter(x => x.ai === ai)) await fetch(`${API}/api/mcp/sessions/${s.id}/disconnect`, { method: "POST" });
+      }
+      loadAiPopover();
+    });
+    return label;
+  }));
+  const statusNames = { ok: "kész", denied: "elutasítva", error: "hiba" };
+  $("aiActivity").replaceChildren(...((data.log || []).slice(0, 8).map(entry => {
+    const li = document.createElement("li");
+    li.className = entry.status;
+    li.innerHTML = `${aiLogo(entry.ai)}<span></span><time></time>`;
+    li.querySelector("span").textContent = entry.summary;
+    li.querySelector("time").textContent = `${new Date(entry.time * 1000).toLocaleTimeString("hu-HU", { hour: "2-digit", minute: "2-digit" })} · ${statusNames[entry.status] || entry.status}`;
+    return li;
+  })));
+  if (!data.log?.length) $("aiActivity").innerHTML = `<li class="muted">Még nem volt AI-művelet.</li>`;
+}
+
+function toggleAiPopover(force) {
+  const pop = $("aiPopover");
+  const open = force ?? pop.hidden;
+  pop.hidden = !open;
+  $("aiStatus").setAttribute("aria-expanded", String(open));
+  if (open) loadAiPopover();
+}
+$("aiStatus").addEventListener("click", () => toggleAiPopover());
+$("aiOpenSettings").addEventListener("click", () => { toggleAiPopover(false); window.openSettings?.("ai"); });
+document.addEventListener("pointerdown", (event) => {
+  if (!$("aiPopover").hidden && !event.target.closest("#aiPopover, #aiStatus")) toggleAiPopover(false);
+}, true);
+document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !$("aiPopover").hidden) toggleAiPopover(false); });
+renderAiStatus([], "ask");

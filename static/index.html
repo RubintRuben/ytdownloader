@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="themes.css" />
     <link rel="stylesheet" href="desktop.css" />
     <link rel="stylesheet" href="ui.css" />
+    <link rel="stylesheet" href="minecraft.css" />
     <link rel="icon" id="appFavicon" type="image/x-icon" href="theme-icons/dark.ico" />
   </head>
   <body>
@@ -17,20 +18,14 @@
       <video id="bgVideoA" muted playsinline preload="auto" hidden></video>
       <video id="bgVideoB" muted playsinline preload="auto" hidden></video>
       <img id="bgImage" alt="" hidden>
+      <iframe id="bgWeb" title="Web-háttér" sandbox="allow-scripts" tabindex="-1" hidden></iframe>
       <div class="bg-dim"></div>
       <div class="bg-flash"></div>
     </div>
 
     <header class="titlebar" id="titlebar">
       <div class="titlebar-drag" id="titlebarDrag"><img data-app-icon src="theme-icons/dark.ico" width="19" height="19" alt=""><span>Downloader</span></div>
-      <button id="aiIndicator" type="button" class="ai-indicator" hidden title="AI-hozzáférés (MCP)">
-        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 5.6L20 10l-5.8 2.4L12 18l-2.2-5.6L4 10l5.8-2.4z"/></svg>
-        <span id="aiIndicatorText">AI</span>
-      </button>
       <button id="updateShortcut" type="button" class="update-shortcut" hidden>Frissítés</button>
-      <button id="settingsBtn" type="button" class="titlebar-btn" title="Beállítások" aria-label="Beállítások">
-        <svg class="line-icon" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1.1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/></svg>
-      </button>
       <div class="window-controls" id="windowControls" hidden>
         <button data-window="minimize" aria-label="Kis méret" title="Kis méret"><svg viewBox="0 0 16 16"><path d="M3 8h10"/></svg></button>
         <button data-window="maximize" aria-label="Teljes méret / visszaállítás" title="Teljes méret / visszaállítás"><svg class="maximize-icon" viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" rx="1"/></svg><svg class="restore-icon" viewBox="0 0 16 16"><path d="M6 4V2.8h7.2V10H12"/><rect x="3" y="5.5" width="8" height="7.5" rx="1"/></svg></button>
@@ -40,9 +35,27 @@
 
     <!-- ===== Oldalsáv ===== -->
     <nav class="topbar" aria-label="Főmenü">
-      <div class="brand">
-        <img class="brand-mark" data-app-icon src="theme-icons/dark.ico" width="36" height="36" alt="">
-        <span class="brand-name">Downloader</span>
+      <div class="side-top">
+        <button id="settingsBtn" type="button" class="side-icon-btn" title="Beállítások" aria-label="Beállítások">
+          <svg class="line-icon" viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1.1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/></svg>
+        </button>
+        <button id="aiStatus" type="button" class="ai-status" aria-haspopup="dialog" aria-expanded="false" title="AI-kapcsolatok">
+          <span class="ai-logos" id="aiLogos"></span>
+          <span class="ai-status-text"><strong id="aiStatusTitle">AI</strong><small id="aiStatusSub">Nincs csatlakozva</small></span>
+          <i class="ai-dot" id="aiDot"></i>
+        </button>
+      </div>
+      <div class="ai-popover" id="aiPopover" role="dialog" aria-label="AI-kapcsolatok" hidden>
+        <header class="ai-pop-head">
+          <strong>AI-kapcsolatok</strong>
+          <span class="ai-mode-chip" id="aiModeChip"></span>
+        </header>
+        <div class="ai-sessions" id="aiSessions"></div>
+        <h4>Engedélyezett AI-k</h4>
+        <div class="ai-toggles" id="aiToggles"></div>
+        <h4>Tevékenység</h4>
+        <ul class="ai-activity" id="aiActivity"></ul>
+        <button type="button" class="btn-list compact" id="aiOpenSettings">AI-beállítások és csatlakoztatás</button>
       </div>
       <div class="tabs" id="tabs">
         <span class="nav-label">FORRÁSOK</span>
@@ -92,19 +105,17 @@
         <div class="settings-panes">
           <section class="settings-pane" data-pane="look">
             <h3>Animált témák</h3>
-            <p class="pane-hint">Élő, folyamatosan ismétlődő háttér; a felület fényei követik a jelenetet.</p>
+            <p class="pane-hint">Élő, varrat nélkül ismétlődő videóháttér. A felület is reagál rá: esőnél nedves üveg, a fekete lyuknál csillagok, a mélytengerben fényhullámok, és a kurzorodra is reagál a jelenet.</p>
             <div class="theme-grid animated" id="animatedThemeGrid"></div>
+            <h3>Saját hátterek</h3>
+            <p class="pane-hint">Kép, videó vagy Wallpaper Engine háttér (videó és web típus). Mindegyikhez külön beállíthatod a felület színét, a sötétítést és a hangot.</p>
+            <div class="theme-grid custom" id="customThemeGrid"></div>
             <h3>Klasszikus témák</h3>
             <div class="theme-grid" id="themeGrid"></div>
-            <h3>Saját háttér</h3>
-            <div class="custom-bg-row">
-              <div class="custom-bg-preview" id="customBgPreview"><span>Nincs kiválasztva</span></div>
-              <div class="custom-bg-actions">
-                <button type="button" class="btn-primary" id="pickBackground">Kép vagy videó választása…</button>
-                <button type="button" class="btn-list" id="useCustomBg" hidden>Saját háttér használata</button>
-                <label class="field-row">Sötétítés <input type="range" id="bgDim" min="0" max="90" value="55"></label>
-                <p class="pane-hint">MP4/WebM videó vagy JPG/PNG/WebP/GIF kép. A videó hang nélkül, finom átúsztatással ismétlődik.</p>
-              </div>
+            <h3>Animált hátterek</h3>
+            <div class="field-grid">
+              <label>Sötétítés <input type="range" id="bgDim" min="0" max="85" value="35"></label>
+              <label class="check-row"><input type="checkbox" id="sceneEffects"> Kurzorra reagáló effektek</label>
             </div>
             <h3>Animáció minősége</h3>
             <div class="segment" id="animQuality">
@@ -149,12 +160,12 @@
               <button type="button" data-value="full"><strong>Teljes hozzáférés</strong><small>Minden művelet kérdés nélkül lefut.</small></button>
             </div>
             <h3>Csatlakoztatás</h3>
+            <p class="pane-hint">Válaszd ki az AI-t, és másold be a parancsot vagy a beállítást az ő alkalmazásába.</p>
+            <div class="ai-picker" id="aiPicker" role="tablist"></div>
             <div class="mcp-config">
-              <div class="mcp-config-head"><span>Claude Code (parancs)</span><button type="button" class="copy-btn" data-copy="mcpCodeCmd">Másolás</button></div>
-              <pre id="mcpCodeCmd"></pre>
-              <div class="mcp-config-head"><span>Claude Desktop · claude_desktop_config.json</span><button type="button" class="copy-btn" data-copy="mcpDesktopJson">Másolás</button></div>
-              <pre id="mcpDesktopJson"></pre>
-              <div class="mcp-config-head"><span>HTTP (Streamable HTTP + Bearer token)</span><button type="button" class="copy-btn" data-copy="mcpHttp">Másolás</button></div>
+              <div class="mcp-config-head"><span id="mcpSnippetLabel"></span><button type="button" class="copy-btn" data-copy="mcpSnippet">Másolás</button></div>
+              <pre id="mcpSnippet"></pre>
+              <div class="mcp-config-head"><span>Bármely MCP-kliens · HTTP (Streamable HTTP + Bearer token)</span><button type="button" class="copy-btn" data-copy="mcpHttp">Másolás</button></div>
               <pre id="mcpHttp"></pre>
               <button type="button" class="btn-list" id="mcpResetToken">Új token (a régi érvénytelen lesz)</button>
             </div>
@@ -185,6 +196,8 @@
                 <p id="updateAccessStatus" role="status"></p>
               </details>
             </div>
+            <h3>Háttérvideók forrása</h3>
+            <ul class="credits" id="themeCredits"></ul>
             <h3>Billentyűparancsok</h3>
             <ul class="shortcut-list">
               <li><kbd>Ctrl K</kbd> Kereső</li><li><kbd>Szóköz</kbd> Lejátszás / szünet</li>
@@ -458,7 +471,8 @@
             <label class="block-label" for="subsSelect">Felirat a fájlban</label>
             <div class="select-wrap"><select id="subsSelect" class="select"></select></div>
             <div class="segment small" id="subsMode" hidden>
-              <button class="seg active" data-mode="embed" type="button">Beágyazva</button>
+              <button class="seg active" data-mode="burn" type="button" title="A videóba égetve, pontosan úgy, ahogy az előnézetben látod">Beégetve</button>
+              <button class="seg" data-mode="embed" type="button" title="Kikapcsolható feliratsáv a lejátszóban">Beágyazva</button>
               <button class="seg" data-mode="srt" type="button">Külön .srt</button>
             </div>
           </div>
@@ -548,6 +562,52 @@
           <button type="submit" class="btn-primary" value="ok">Mentés</button>
         </div>
       </form>
+    </dialog>
+
+    <!-- Saját téma szerkesztése -->
+    <dialog class="small-dialog theme-editor" id="themeEditor" aria-labelledby="themeEditorTitle">
+      <form method="dialog" id="themeEditorForm">
+        <h2 id="themeEditorTitle">Saját téma</h2>
+        <div class="te-preview" id="tePreview"></div>
+        <label class="te-field">Név <input id="teName" maxlength="60" class="te-input"></label>
+        <div class="te-colors">
+          <div>
+            <span class="te-label">Kiemelőszín</span>
+            <div class="swatch-row" id="teAccent"></div>
+          </div>
+          <div>
+            <span class="te-label">Felület színe</span>
+            <div class="swatch-row" id="teSurface"></div>
+          </div>
+        </div>
+        <label class="te-field">Sötétítés <input type="range" id="teDim" min="0" max="90"></label>
+        <div class="te-sound" id="teSoundRow">
+          <label class="check-row"><input type="checkbox" id="teSound"> Hang lejátszása</label>
+          <label class="te-field inline">Hangerő <input type="range" id="teVolume" min="0" max="100"></label>
+        </div>
+        <p class="pane-hint" id="teSource"></p>
+        <div class="dialog-actions spread">
+          <button type="button" class="btn-list danger-text" id="teDelete">Törlés</button>
+          <span>
+            <button type="button" class="btn-list" id="teCancel">Mégse</button>
+            <button type="submit" class="btn-primary" value="ok">Mentés és használat</button>
+          </span>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Wallpaper Engine böngésző -->
+    <dialog class="small-dialog we-dialog" id="weDialog" aria-labelledby="weTitle">
+      <header class="we-head">
+        <h2 id="weTitle">Wallpaper Engine hátterek</h2>
+        <button type="button" class="icon-btn" id="weClose" aria-label="Bezárás">✕</button>
+      </header>
+      <p class="pane-hint">A Steamen telepített háttereid. A videó és web típusúak teljes minőségben működnek; a 3D „scene” háttereket a Wallpaper Engine saját motorja rajzolja, ezekből csak az animált előnézet importálható.</p>
+      <div class="we-grid" id="weGrid"></div>
+      <div class="dialog-actions spread">
+        <button type="button" class="btn-list" id="weBrowse">Másik mappa (project.json)…</button>
+        <span class="pane-hint" id="weStatus"></span>
+      </div>
     </dialog>
 
     <!-- Megerősítés -->

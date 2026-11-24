@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
 import sys
 import time
 from pathlib import Path
@@ -69,10 +70,47 @@ def run_stdio_bridge(server_file, launch: Callable[[], None]) -> int:
             time.sleep(0.5)
             target = endpoint()
     client = httpx.Client(timeout=httpx.Timeout(900, connect=10), trust_env=False)
+    state = {"session": None, "init": None}
+    lock = threading.Lock()
 
     def send(obj):
-        stdout.write(json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n")
-        stdout.flush()
+        with lock:
+            stdout.write(json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n")
+            stdout.flush()
+
+    def headers():
+        h = {"Authorization": f"Bearer {target['token']}", "Content-Type": "application/json", "X-MCP-Transport": "stdio"}
+        if state["session"]:
+            h["Mcp-Session-Id"] = state["session"]
+        return h
+
+    def revoked(response) -> bool:
+        return response.status_code == 404 and response.headers.get("x-downloader-revoked") == "1"
+
+    def reregister():
+        """The app restarted: register this client again so it shows up as connected."""
+        if not state["init"] or not target:
+            return
+        state["session"] = None
+        response = client.post(target["url"] + "/mcp", content=state["init"], headers=headers())
+        state["session"] = response.headers.get("mcp-session-id") or None
+
+    def heartbeat():
+        beat = httpx.Client(timeout=5, trust_env=False)
+        while True:
+            time.sleep(15)
+            if not target or not state["session"]:
+                continue
+            try:
+                response = beat.post(target["url"] + "/mcp/heartbeat", headers=headers())
+                if revoked(response):
+                    os._exit(0)  # the user disconnected this AI in the app
+                if response.status_code == 404:
+                    reregister()
+            except Exception:  # noqa: BLE001 - the app may be restarting
+                pass
+
+    threading.Thread(target=heartbeat, daemon=True).start()
 
     for raw in iter(stdin.readline, b""):
         line = raw.strip()
@@ -89,14 +127,27 @@ def run_stdio_bridge(server_file, launch: Callable[[], None]) -> int:
                 send({"jsonrpc": "2.0", "id": message["id"],
                       "error": {"code": -32000, "message": "The Downloader app is not running."}})
             continue
+        is_init = isinstance(message, dict) and message.get("method") == "initialize"
+        if is_init:
+            state["init"], state["session"] = line, None
         try:
-            response = client.post(target["url"] + "/mcp", content=line,
-                                   headers={"Authorization": f"Bearer {target['token']}",
-                                            "Content-Type": "application/json"})
+            response = client.post(target["url"] + "/mcp", content=line, headers=headers())
+            if revoked(response):
+                if isinstance(message, dict) and message.get("id") is not None:
+                    send({"jsonrpc": "2.0", "id": message["id"],
+                          "error": {"code": -32002, "message": "Disconnected by the user in Downloader."}})
+                os._exit(0)
+            if is_init and response.headers.get("mcp-session-id"):
+                state["session"] = response.headers["mcp-session-id"]
             if response.status_code == 200 and response.content:
                 send(response.json())
         except Exception as exc:  # noqa: BLE001
             target = None
             if isinstance(message, dict) and message.get("id") is not None:
                 send({"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32000, "message": str(exc)}})
+    if target and state["session"]:
+        try:
+            client.request("DELETE", target["url"] + "/mcp", headers=headers(), timeout=3)
+        except Exception:  # noqa: BLE001
+            pass
     return 0

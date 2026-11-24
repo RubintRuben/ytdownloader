@@ -1,0 +1,140 @@
+/* minecraft.css — pixeles, Minecraft-hangulatú felület a Minecraft témához. */
+
+@font-face {
+  font-family: "Pixelify Sans"; font-style: normal; font-weight: 400 700; font-display: swap;
+  src: url("fonts/pixelify-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Pixelify Sans"; font-style: normal; font-weight: 400 700; font-display: swap;
+  src: url("fonts/pixelify-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+[data-theme="minecraft"] {
+  --mc-font: "Pixelify Sans", "Segoe UI", sans-serif;
+  --display-font: var(--mc-font);
+  --mc-shadow: 2px 2px 0 #3f3f3f;
+  --mc-bevel: inset 2px 2px 0 #ffffff59, inset -2px -3px 0 #00000073;
+  --mc-panel: rgba(0, 0, 0, .66);
+  --radius: 0px;
+}
+[data-theme="minecraft"] body, [data-theme="minecraft"] :is(button, input, select, textarea) { font-family: var(--mc-font); }
+[data-theme="minecraft"] *, [data-theme="minecraft"] *::before, [data-theme="minecraft"] *::after { border-radius: 0 !important; }
+[data-theme="minecraft"] :is(img, video, canvas, .yt-thumb, .short-thumb, .g-thumb) { image-rendering: auto; }
+.bg-layer canvas.pixel { image-rendering: pixelated; }
+
+/* --- szöveg --- */
+[data-theme="minecraft"] :is(h1, h2, h3, strong, .yt-title, .tab, .jobs-btn, .btn-primary, .btn-download, .btn-list, .seg, .q-chip) {
+  text-shadow: var(--mc-shadow); letter-spacing: .02em;
+}
+[data-theme="minecraft"] .hero-title { font-weight: 700; letter-spacing: 0; text-shadow: 4px 4px 0 #3f3f3f; }
+[data-theme="minecraft"] .hero-content { position: relative; }
+[data-theme="minecraft"] .hero-title::after {
+  content: "Most már kockásan!"; position: absolute; left: min(62%, 560px); top: 8px; transform: rotate(-17deg);
+  font: 700 18px var(--mc-font); color: #ffff55; text-shadow: 2px 2px 0 #3f3f15; white-space: nowrap; pointer-events: none;
+  animation: mc-splash .5s ease-in-out infinite alternate;
+}
+@keyframes mc-splash { to { transform: rotate(-17deg) scale(1.08); } }
+[data-theme="minecraft"] .landing.searching .hero-title::after { display: none; }
+
+/* --- paneleket sötét, keretes menüdobozok --- */
+[data-theme="minecraft"] :is(.hero, .ed-side, .ed-player, .jobs-panel, .settings-dialog, .small-dialog, .ai-popover, .context-menu,
+  .player-menu, .viewer, .approval-card, .selection-bar, .yt-channels, .gallery-head, .source-card) {
+  background: var(--mc-panel) !important; border: 2px solid #000 !important; box-shadow: var(--mc-bevel), 0 6px 0 #0006 !important;
+  backdrop-filter: none !important;
+}
+[data-theme="minecraft"] .hero { animation: none; }
+[data-theme="minecraft"] .hero::before { display: none; }
+[data-theme="minecraft"] .settings-tabs, [data-theme="minecraft"] .settings-header { border-color: #000; }
+[data-theme="minecraft"] :is(.settings-dialog, .small-dialog)::backdrop { background: #0009; backdrop-filter: none; }
+
+/* --- oldalsáv és címsor: sötétített föld-textúra --- */
+[data-theme="minecraft"] .topbar {
+  background: linear-gradient(#000000a6, #000000a6), var(--mc-dirt) 0 0 / 64px 64px !important; image-rendering: pixelated;
+  border-right: 2px solid #000 !important; box-shadow: none !important;
+}
+[data-theme="minecraft"] .titlebar {
+  background: linear-gradient(#000000b8, #000000b8), var(--mc-dirt) 0 0 / 64px 64px !important; image-rendering: pixelated; border-bottom: 2px solid #000;
+}
+[data-theme="minecraft"] .nav-label { color: #a8a8a8; text-shadow: var(--mc-shadow); }
+
+/* --- gombok: kő-textúra, fekete keret, domború él; rámutatva fehér keret és sárgás szöveg --- */
+[data-theme="minecraft"] :is(.btn-primary, .btn-download, .btn-list, .jobs-btn, .tab:not(.platform-tab), .seg, .q-chip, .icon-btn,
+  .side-icon-btn, .ai-status, .preview-control, .yt-sub-btn, .yt-pill, .copy-btn, .sel-btn, .tile-tools button, .channel-back,
+  .paste-button, .jc-save, .list-tool-btn, .shorts-toggle, .clip-chip, .format-cards .seg, .choice-cards button, .ai-picker button,
+  .settings-tabs button, .ai-toggle, .yt-channel-tabs button, .update-shortcut, .window-controls button, .titlebar-btn, .yt-quick, .link-btn) {
+  background: var(--mc-stone) 0 0 / 32px 32px !important; image-rendering: pixelated;
+  color: #e0e0e0 !important; border: 2px solid #000 !important; box-shadow: var(--mc-bevel) !important;
+  text-shadow: var(--mc-shadow); transition: none !important; filter: none !important;
+}
+[data-theme="minecraft"] :is(.btn-primary, .btn-download, .btn-list, .jobs-btn, .tab:not(.platform-tab), .seg, .q-chip, .icon-btn,
+  .side-icon-btn, .ai-status, .preview-control, .yt-sub-btn, .yt-pill, .copy-btn, .sel-btn, .tile-tools button, .channel-back,
+  .paste-button, .jc-save, .list-tool-btn, .shorts-toggle, .clip-chip, .format-cards .seg, .choice-cards button, .ai-picker button,
+  .settings-tabs button, .ai-toggle, .yt-channel-tabs button, .update-shortcut, .titlebar-btn, .link-btn):hover:not(:disabled) {
+  border-color: #fff !important; color: #ffffa0 !important;
+}
+[data-theme="minecraft"] :is(button, .tab)::before { display: none !important; }
+[data-theme="minecraft"] :is(button:disabled, .btn-download:disabled) { background-color: #2b2b2b !important; color: #6f6f6f !important; background-blend-mode: multiply; }
+/* kijelölt / aktív: zöldes, mintha be lenne kapcsolva */
+[data-theme="minecraft"] :is(.seg.active, .q-chip.active, .tab.active:not(.platform-tab), .choice-cards button.active, .jobs-btn.active-view,
+  .ai-picker button[aria-selected="true"], .settings-tabs button[aria-selected="true"], .yt-channel-tabs button[aria-selected="true"],
+  .format-cards .seg.active, .theme-tile[aria-pressed="true"]) {
+  background: linear-gradient(#5fb32f8c, #3c7a1a8c), var(--mc-stone) 0 0 / 32px 32px !important; color: #fff !important;
+}
+[data-theme="minecraft"] .q-chip.active :is(small, strong), [data-theme="minecraft"] .format-cards .seg.active :is(strong, small) { color: #fff !important; }
+/* a fő letöltés gomb: fű-zöld */
+[data-theme="minecraft"] :is(.btn-download, .btn-primary:not(.danger)) {
+  background: linear-gradient(#6fcf3bcc, #3f8f1fcc), var(--mc-stone) 0 0 / 32px 32px !important; color: #fff !important;
+}
+[data-theme="minecraft"] .btn-primary.danger, [data-theme="minecraft"] .sel-btn.danger { background: linear-gradient(#c0283fcc, #7a1222cc), var(--mc-stone) 0 0 / 32px 32px !important; }
+[data-theme="minecraft"] .yt-sub-btn { background: linear-gradient(#ffffffb3, #d0d0d0b3), var(--mc-stone) 0 0 / 32px 32px !important; color: #202020 !important; text-shadow: none; }
+
+/* platform-gombok (képes) kockás kerettel */
+[data-theme="minecraft"] .tab.platform-tab { border: 2px solid #000 !important; box-shadow: var(--mc-bevel) !important; }
+[data-theme="minecraft"] .tab.platform-tab.active { outline: 2px solid #fff; outline-offset: -4px; }
+[data-theme="minecraft"] .tab.platform-tab.active::after { background: #ffff55; box-shadow: 2px 2px 0 #3f3f15; }
+
+/* --- szövegmezők: fekete mező, szürke keret (mint a Minecraft beviteli mezői) --- */
+[data-theme="minecraft"] :is(.search-field, .select, .te-input, .time-input, .gallery-tools input, .list-filters input, .list-filters select,
+  .update-access input, .range-inputs label, .range-inputs .ro, .folder-row code, .mcp-config pre, .field-grid .time-input) {
+  background: #000 !important; border: 2px solid #a0a0a0 !important; box-shadow: none !important; color: #e0e0e0 !important;
+}
+[data-theme="minecraft"] :is(.search-field:focus-within, .select:focus, .te-input:focus, .time-input:focus) { border-color: #fff !important; }
+[data-theme="minecraft"] #url::placeholder { color: #707070; }
+
+/* --- folyamatjelzők: tapasztalatsáv --- */
+[data-theme="minecraft"] :is(.progress-track, .jc-bar) {
+  height: 10px; background: #1b1b1b !important; border: 2px solid #000 !important; box-shadow: inset 0 2px 0 #00000080;
+}
+[data-theme="minecraft"] :is(.progress-fill, .jc-fill) {
+  background: linear-gradient(#bfff66 0 30%, #80ff20 30% 70%, #4f9f12 70%) !important; box-shadow: 0 0 6px #80ff2080;
+}
+[data-theme="minecraft"] .progress-fill::after { display: none; }
+[data-theme="minecraft"] #progressPct { color: #80ff20; text-shadow: 2px 2px 0 #1c3a05; }
+[data-theme="minecraft"] .jobs-badge { background: #80ff20; color: #1c3a05; text-shadow: none; }
+
+/* --- kártyák, rács --- */
+[data-theme="minecraft"] :is(.yt-thumb, .short-thumb, .g-thumb, .we-thumb, .theme-swatch, .yt-channel-banner) { border: 2px solid #000; box-shadow: 0 4px 0 #0007; }
+[data-theme="minecraft"] .yt-card:hover .yt-thumb { outline: 2px solid #fff; outline-offset: -2px; }
+[data-theme="minecraft"] .yt-avatar, [data-theme="minecraft"] .ycr-avatar, [data-theme="minecraft"] .yt-channel-avatar { border: 2px solid #000; }
+[data-theme="minecraft"] .yt-badge { background: #000; border: 1px solid #555; font-family: var(--mc-font); }
+[data-theme="minecraft"] .theme-tile { background: var(--mc-panel); border: 2px solid #000; }
+[data-theme="minecraft"] .timeline, [data-theme="minecraft"] .filmstrip { border: 2px solid #000; }
+[data-theme="minecraft"] .tl-handle { background: #fff; box-shadow: 2px 2px 0 #000; }
+[data-theme="minecraft"] .tl-handle span { background: #555; }
+[data-theme="minecraft"] .tl-bubble { background: #000; color: #ffff55; border: 1px solid #555; }
+[data-theme="minecraft"] .tl-bubble::after { border-top-color: #000; }
+
+/* --- értesítés: „Advancement made!” stílus --- */
+[data-theme="minecraft"] .toast {
+  background: #212121 !important; border: 2px solid #000 !important; box-shadow: inset 2px 2px 0 #555, inset -2px -2px 0 #111, 0 4px 0 #0008 !important;
+  color: #fff; font-family: var(--mc-font);
+}
+[data-theme="minecraft"] .toast.success > span::before { content: "Siker! "; color: #ffff55; text-shadow: 2px 2px 0 #3f3f15; }
+[data-theme="minecraft"] .toast.error > span::before { content: "Hoppá! "; color: #ff5555; text-shadow: 2px 2px 0 #3f1515; }
+
+/* --- görgetősáv --- */
+[data-theme="minecraft"] *::-webkit-scrollbar { width: 12px; }
+[data-theme="minecraft"] *::-webkit-scrollbar-thumb { background: #8b8b8b; border: 2px solid #000; box-shadow: inset 2px 2px 0 #c6c6c6, inset -2px -2px 0 #555; background-clip: border-box; }
+[data-theme="minecraft"] *::-webkit-scrollbar-track { background: #00000066; }

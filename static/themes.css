@@ -66,13 +66,13 @@
   --hero-surface: rgba(24, 14, 12, .62); --hero-glint: rgba(255, 140, 60, .22);
   --error-text: #ffb4a8; --scrim: #0201068f;
 }
-[data-theme="deepsea"] {
+[data-theme="minecraft"] {
   color-scheme: dark;
-  --bg: rgba(0, 12, 22, .26); --bg-2: rgba(2, 20, 32, .72); --panel: rgba(4, 30, 46, .66); --panel-2: rgba(8, 48, 68, .78);
-  --line: rgba(110, 230, 255, .13); --line-2: rgba(110, 230, 255, .26); --text: #e8fbff; --muted: #a9d3dc; --muted-2: #7fb0bd;
-  --accent: #5ee7ff; --accent-2: #8fb8ff; --on-accent: #022230; --glow: 70,210,255;
-  --hero-surface: rgba(2, 34, 52, .6); --hero-glint: rgba(60, 200, 230, .22);
-  --error-text: #ffb9c4; --scrim: #00101a8f;
+  --bg: rgba(0, 0, 0, .18); --bg-2: rgba(20, 20, 20, .8); --panel: rgba(0, 0, 0, .62); --panel-2: rgba(70, 70, 70, .8);
+  --line: rgba(0, 0, 0, .9); --line-2: rgba(160, 160, 160, .6); --text: #f0f0f0; --muted: #c6c6c6; --muted-2: #a0a0a0;
+  --accent: #80ff20; --accent-2: #ffff55; --on-accent: #1c3a05; --glow: 128,255,32;
+  --hero-surface: rgba(0, 0, 0, .6); --hero-glint: rgba(128, 255, 32, .12);
+  --error-text: #ff5555; --scrim: #0000009a;
 }
 [data-theme="rain"] {
   color-scheme: dark;
