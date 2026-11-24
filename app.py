@@ -518,15 +518,21 @@ def _has_codec(fmt: dict, track: str) -> bool:
     return codec not in (None, "none")
 
 
+def _browser_preview_type(fmt: dict) -> str | None:
+    video, audio = fmt.get("vcodec") or "", fmt.get("acodec")
+    if fmt.get("ext") == "mp4" and video.startswith(("avc1", "h264")) and audio in {"aac", "mp4a.40.2"}:
+        return "video/mp4"
+    if fmt.get("ext") == "webm" and video.startswith(("vp8", "vp9", "vp09")) and audio in {"opus", "vorbis"}:
+        return "video/webm"
+    return None
+
+
 def _direct_preview_format(info: dict) -> dict | None:
-    # Prefer small, browser-compatible streams with both audio and video.
     return min((fmt for fmt in [*(info.get("formats") or []), info]
                 if fmt.get("protocol") in {"http", "https"}
                 and is_http_url(fmt.get("url") or "")
-                and not fmt.get("has_drm")
-                and fmt.get("ext") == "mp4"
-                and (fmt.get("vcodec") or "").startswith(("avc1", "h264"))
-                and fmt.get("acodec") in {"aac", "mp4a.40.2"}), key=_preview_rank, default=None)
+                and not fmt.get("has_drm") and _browser_preview_type(fmt)),
+               key=lambda fmt: (*_preview_rank(fmt)[:2], fmt.get("ext") != "mp4", fmt.get("tbr") or 0), default=None)
 
 
 def _stream_preview_formats(info: dict, audio_lang: str | None = None) -> tuple[dict, ...]:
@@ -627,8 +633,8 @@ def _get_preview_source(key: str):
 def _ffmpeg_preview_command(ffmpeg: Path, info: dict, streams: tuple[dict, ...], start: float) -> list[str]:
     command = [str(ffmpeg), "-nostdin", "-hide_banner", "-loglevel", "error", "-filter_threads", "2"]
     for fmt in streams:
-        command += ["-rw_timeout", "12000000", "-protocol_whitelist", "http,https,tcp,tls,crypto",
-                    "-threads", "2"]
+        command += ["-rw_timeout", "9000000", "-protocol_whitelist", "http,https,tcp,tls,crypto",
+                    "-analyzeduration", "1500000", "-probesize", "524288", "-threads", "2"]
         headers = _preview_headers(info, fmt)
         if headers:
             command += ["-headers", "".join(f"{key}: {value}\r\n" for key, value in headers.items())]
@@ -639,11 +645,11 @@ def _ffmpeg_preview_command(ffmpeg: Path, info: dict, streams: tuple[dict, ...],
         "-map", "0:v:0", "-map", f"{len(streams) - 1}:a:0?", "-map_metadata", "-1",
         "-vf", "scale=640:640:force_original_aspect_ratio=decrease:force_divisible_by=2",
         "-r", "30", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "baseline",
-        "-level:v", "3.1", "-preset", "ultrafast", "-crf", "25", "-g", "30",
-        "-sc_threshold", "0", "-threads", "2",
+        "-level:v", "3.1", "-preset", "ultrafast", "-tune", "zerolatency", "-crf", "25",
+        "-g", "12", "-sc_threshold", "0", "-threads", "2",
         "-c:a", "aac", "-profile:a", "aac_low", "-b:a", "96k", "-ac", "2",
         "-movflags", "+empty_moov+default_base_moof+frag_keyframe+skip_trailer",
-        "-flush_packets", "1", "-f", "mp4", "pipe:1",
+        "-frag_duration", "400000", "-flush_packets", "1", "-f", "mp4", "pipe:1",
     ]
 
 
@@ -1174,6 +1180,7 @@ async def api_info(url: str = Query(...), browser: str = "", source: str = "any"
     _subtitle_sources[subs_key] = (time.monotonic(), info)
     while len(_subtitle_sources) > 64:
         _subtitle_sources.popitem(last=False)
+    cached_preview = _preview_cache.get(url)
     return {
         "audioTracks": _audio_tracks(info),
         **_subtitle_listing(info),
@@ -1194,6 +1201,8 @@ async def api_info(url: str = Query(...), browser: str = "", source: str = "any"
         "streamUrl": stream,
         "streamHasAudio": has_audio,
         "previewUrl": "/api/preview?url=" + urllib.parse.quote(url, safe=""),
+        "previewCached": bool(cached_preview and cached_preview.is_file()),
+        "previewHasAudio": _preview_state.get(url, {}).get("hasAudio", True),
         "isLive": bool(info.get("is_live")),
     }
 
@@ -1322,7 +1331,7 @@ async def api_media(key: str, request: Request):
     passthrough = {key: response.headers[key] for key in ("content-length", "content-range", "accept-ranges")
                    if key in response.headers}
     passthrough["Cache-Control"] = "no-store"
-    return StreamingResponse(body, status_code=status, media_type="video/mp4",
+    return StreamingResponse(body, status_code=status, media_type=_browser_preview_type(direct),
                              headers=passthrough, background=cleanup)
 
 
@@ -1464,7 +1473,7 @@ def _start_preview(url: str):
 
 
 @app.get("/api/preview/status")
-async def api_preview_status(url: str = Query(...), retry: bool = False):
+async def api_preview_status(url: str = Query(...), retry: bool = False, wait: bool = False):
     validate_source_url(url)
     if retry and url not in _preview_pending:
         _preview_cache.pop(url, None)
@@ -1474,6 +1483,8 @@ async def api_preview_status(url: str = Query(...), retry: bool = False):
                 _info_cache.pop(key, None)
     if _preview_state.get(url, {}).get("status") != "error":
         _start_preview(url)
+    if wait and (pending := _preview_pending.get(url)):
+        await asyncio.wait((pending,), timeout=1.0)
     return _preview_state.get(url, {"status": "preparing"})
 
 
@@ -2514,13 +2525,12 @@ async def api_library_edit(item_id: str, request: Request):
 
 
 # ----------------------------------------------------------------------------
-# Saját hátterek (kép, videó, Wallpaper Engine) és az animált témák videói
+# Saját hátterek (kép, videó, Wallpaper Engine) és beépített animált témák
 # ----------------------------------------------------------------------------
 
 _backgrounds = backgrounds.Backgrounds(BACKGROUND_DIR, lambda: _load_settings(), lambda s: _save_settings(s),
                                        lambda: _ensure_ffmpeg_on_path(), _settings_lock)
-_theme_videos = theme_media.ThemeVideos(USER_DATA_DIR / "theme-videos", BASE_DIR / "wallpapers",
-                                        lambda: _ensure_ffmpeg_on_path(), lambda m: _log(m))
+_bundled_themes = theme_media.BundledThemes(USER_DATA_DIR / "theme-videos", BASE_DIR / "wallpapers", lambda message: _log(message))
 
 
 def _valid_theme(theme) -> bool:
@@ -2603,25 +2613,11 @@ async def api_custom_theme_files(theme_id: str, relative: str):
 async def api_theme_files(scene: str, relative: str):
     if scene not in theme_media.DEFAULT_PROJECTS:
         raise HTTPException(404, "Ismeretlen téma.")
-    asset = await asyncio.to_thread(_theme_videos.asset, scene, relative)
+    asset = await asyncio.to_thread(_bundled_themes.asset, scene, relative)
     if not asset:
         raise HTTPException(404, "A fájl nem található.")
     path, project = asset
     return _wallpaper_file(path, project, relative, True)
-
-
-@app.post("/api/theme-video/{scene}/wallpaper")
-async def api_theme_wallpaper(scene: str, request: Request):
-    """Use an installed Wallpaper Engine wallpaper as an animated theme's background."""
-    if scene not in theme_media.DEFAULT_PROJECTS:
-        raise HTTPException(404, "Ismeretlen téma.")
-    target = Path(str((await request.json()).get("path") or ""))
-    if not any(root.resolve() in target.resolve().parents for root in backgrounds.steam_libraries()):
-        raise HTTPException(400, "Csak a Steam-könyvtárban lévő hátterek választhatók innen.")
-    try:
-        return await asyncio.to_thread(_theme_videos.install_wallpaper, scene, target)
-    except (OSError, ValueError) as exc:
-        raise HTTPException(400, str(exc)) from exc
 
 
 @app.get("/api/wallpaper-engine")
@@ -2654,33 +2650,15 @@ async def api_wallpaper_engine_import(request: Request):
 async def api_theme_video_status(scene: str, prepare: bool = False):
     if scene not in theme_media.DEFAULT_PROJECTS:
         raise HTTPException(404, "Ismeretlen téma.")
-    return await asyncio.to_thread(_theme_videos.ensure if prepare else _theme_videos.status, scene)
+    return await asyncio.to_thread(_bundled_themes.ensure if prepare else _bundled_themes.status, scene)
 
 
 @app.get("/api/theme-video/{scene}/preview")
 async def api_theme_preview(scene: str):
-    path = await asyncio.to_thread(_theme_videos.preview, scene) if scene in theme_media.DEFAULT_PROJECTS else None
+    path = await asyncio.to_thread(_bundled_themes.preview, scene) if scene in theme_media.DEFAULT_PROJECTS else None
     if not path:
         raise HTTPException(404, "A téma előnézete nem található.")
     return FileResponse(path, headers={"Cache-Control": "no-store"})
-
-
-@app.get("/api/theme-video/{scene}")
-async def api_theme_video(scene: str):
-    path = _theme_videos.video_path(scene) if scene in theme_media.DEFAULT_PROJECTS else None
-    if not path:
-        raise HTTPException(404, "A háttérvideó még nincs kész.")
-    return FileResponse(path, media_type="video/mp4", headers={"Cache-Control": "max-age=3600"})
-
-
-@app.post("/api/theme-video/{scene}/reset")
-async def api_theme_video_reset(scene: str):
-    if scene not in theme_media.DEFAULT_PROJECTS:
-        raise HTTPException(404, "Ismeretlen téma.")
-    try:
-        return await asyncio.to_thread(_theme_videos.reset, scene)
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
 
 
 # ----------------------------------------------------------------------------
@@ -3421,38 +3399,28 @@ class _NativeApi:
         _update_settings({"download_dir": folder})
         return folder
 
-    def pick_background(self) -> dict:
-        """Add a custom theme from an image, a video or a Wallpaper Engine project.json."""
-        result = self._window.create_file_dialog(
-            self._open_dialog_type(),
-            file_types=("Képek, videók, Wallpaper Engine (*.jpg;*.jpeg;*.png;*.webp;*.gif;*.mp4;*.webm;*.mov;*.m4v;*.mkv;project.json)",
-                        "Minden fájl (*.*)"))
-        if not result:
-            return {"ok": False}
-        path = result if isinstance(result, str) else result[0]
+    def pick_background(self, project: bool = False) -> dict:
+        """Add a custom theme using the Windows file picker."""
+        if project:
+            file_types = ("Wallpaper Engine projekt (*.json)",)
+        else:
+            file_types = tuple(
+                f"{name} ({';'.join('*' + extension for extension in sorted(extensions))})"
+                for name, extensions in (("Képek és videók", backgrounds.IMAGE | backgrounds.VIDEO),
+                                         ("Képek", backgrounds.IMAGE), ("Videók", backgrounds.VIDEO))
+            )
         try:
-            if Path(path).name.lower() == "project.json":
+            result = self._window.create_file_dialog(self._open_dialog_type(), file_types=file_types)
+            if not result:
+                return {"ok": False}
+            path = result if isinstance(result, str) else result[0]
+            if project:
+                if Path(path).name.lower() != "project.json":
+                    raise ValueError("Válaszd ki a háttér project.json fájlját.")
                 theme = _backgrounds.add_wallpaper_engine(path)
             else:
                 theme = _backgrounds.add_file(path)
             return {"ok": True, "theme": _public_theme(theme)}
-        except (OSError, ValueError) as exc:
-            return {"ok": False, "error": str(exc)}
-
-    def pick_theme_video(self, scene: str) -> dict:
-        """Replace an animated theme's background with a video or a Wallpaper Engine project.json."""
-        if scene not in theme_media.DEFAULT_PROJECTS:
-            return {"ok": False}
-        result = self._window.create_file_dialog(
-            self._open_dialog_type(),
-            file_types=("Videó vagy Wallpaper Engine (*.mp4;*.webm;*.mov;*.m4v;*.mkv;project.json)", "Minden fájl (*.*)"))
-        if not result:
-            return {"ok": False}
-        path = Path(result if isinstance(result, str) else result[0])
-        try:
-            if path.name.lower() == "project.json":
-                return {"ok": True, "status": _theme_videos.install_wallpaper(scene, path.parent)}
-            return {"ok": True, "status": _theme_videos.install_custom(scene, path)}
         except (OSError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -3721,7 +3689,7 @@ if __name__ == "__main__":
                     or not (STATIC_DIR / "settings.js").is_file()):
                 raise SystemExit(1)
         with tempfile.TemporaryDirectory() as cache:
-            themes = theme_media.ThemeVideos(Path(cache), BASE_DIR / "wallpapers", lambda: None, _log)
+            themes = theme_media.BundledThemes(Path(cache), BASE_DIR / "wallpapers", _log)
             for scene in theme_media.DEFAULT_PROJECTS:
                 status = themes.ensure(scene)
                 if status["state"] != "ready" or not themes.asset(scene, status["file"]) or not themes.preview(scene):

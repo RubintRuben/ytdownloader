@@ -1,6 +1,6 @@
 /* ui.css — YouTube-szerű rács, csatornaoldal, letöltőpanel, galéria, élő témák. */
 
-:root { --scene-pulse: 0; --scene-flash: 0; --bg-dim: .55; }
+:root { --scene-pulse: 0; --bg-dim: .55; }
 
 /* ===== Élő háttér ===== */
 .bg-layer { position: fixed; inset: 0; z-index: 0; pointer-events: none; display: none; background: #000; }
@@ -11,8 +11,8 @@ body.animated-bg .bg-layer { display: block; }
 .bg-layer video.visible { opacity: 1; }
 .bg-dim { position: absolute; inset: 0; background: #000; opacity: 0; }
 .bg-layer[data-scene="custom"] .bg-dim { opacity: var(--bg-dim); }
-.bg-layer[data-scene="blackhole"] .bg-dim, .bg-layer[data-scene="minecraft"] .bg-dim, .bg-layer[data-scene="rain"] .bg-dim { opacity: calc(var(--bg-dim) * .45); }
-.bg-flash { position: absolute; inset: 0; background: radial-gradient(120% 80% at 50% 0%, #cfd8ff, transparent 70%); opacity: calc(var(--scene-flash) * .22); mix-blend-mode: screen; }
+.bg-layer[data-scene="minecraft"] .bg-dim, .bg-layer[data-scene="rain"] .bg-dim { opacity: calc(var(--bg-dim) * .45); }
+.bg-layer[data-scene="blackhole"] .bg-dim { opacity: calc(var(--bg-dim) * .58); }
 
 body.animated-bg { background: transparent; }
 body.animated-bg :is(.landing, .editor, .gallery) { background: transparent; position: relative; z-index: 1; }
@@ -23,9 +23,9 @@ body.glass-high :is(.topbar, .titlebar, .ed-side, .settings-dialog, .jobs-panel,
 body.animated-bg .hero {
   background: linear-gradient(140deg, var(--hero-surface), color-mix(in srgb, var(--bg-2) 70%, transparent));
   box-shadow: 0 0 calc(30px + 50px * var(--scene-pulse)) rgba(var(--glow), calc(.06 + .16 * var(--scene-pulse))),
-              0 0 0 1px rgba(var(--glow), calc(.08 + .18 * var(--scene-flash))) inset;
+              0 0 0 1px rgba(var(--glow), .08) inset;
 }
-body.animated-bg .topbar { box-shadow: inset -1px 0 0 rgba(var(--glow), calc(.10 + .25 * var(--scene-pulse) + .5 * var(--scene-flash))); }
+body.animated-bg .topbar { box-shadow: inset -1px 0 0 rgba(var(--glow), calc(.10 + .25 * var(--scene-pulse))); }
 body.animated-bg .btn-download, body.animated-bg .btn-primary { box-shadow: 0 6px calc(14px + 22px * var(--scene-pulse)) rgba(var(--glow), calc(.16 + .3 * var(--scene-pulse))); }
 body.animated-bg :is(.yt-card, .short-card, .g-card) .yt-thumb, body.animated-bg .g-thumb, body.animated-bg .short-thumb {
   box-shadow: 0 0 0 1px rgba(255,255,255,.04), 0 10px 28px rgba(0,0,0,.35);
@@ -642,11 +642,10 @@ body.animated-bg .yt-channel-desc .more { background: transparent; }
 .theme-tile .tile-caption strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile-status { position: absolute; left: 12px; top: 12px; max-width: calc(100% - 24px); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-style: normal; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 6px; background: #000a; color: #fff; }
 .tile-status:empty { display: none; }
-.tile-tools { display: flex; gap: 4px; }
-.tile-tools button, .tile-actions button {
+.tile-actions button {
   border: 1px solid var(--line-2); background: var(--panel-2); color: var(--text); border-radius: 7px; padding: 4px 8px; font-size: 11px; cursor: pointer;
 }
-.tile-tools button:hover, .tile-actions button:hover { border-color: var(--accent); }
+.tile-actions button:hover { border-color: var(--accent); }
 .theme-grid.custom { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .theme-grid.custom .theme-swatch { height: 78px; }
 .custom-tile { position: relative; }
@@ -708,23 +707,42 @@ input.swatch.custom-color::-webkit-color-swatch { border: 0; border-radius: 50%;
 /* web-háttér (Wallpaper Engine) */
 .bg-layer iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; pointer-events: none; }
 
-/* ===== A felület anyaga az animált témákban =====
-   nedves üveg (eső), csillagos üveg (fekete lyuk), kausztikus fény (mélytenger);
-   a kurzor közelében az anyag felcsillan, és fény követi a kurzort az üvegen */
-body:is(.scene-rain, .scene-blackhole) :is(.hero, .ed-side, .source-card) { position: relative; isolation: isolate; }
-body:is(.scene-rain, .scene-blackhole) :is(.hero, .ed-side, .source-card, .settings-dialog)::after {
-  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; border-radius: inherit;
+/* A felületek textúrája a gombok és a szöveg alatt marad. */
+body:is(.scene-rain, .scene-blackhole, .scene-minecraft) :is(.hero, .ed-side, .source-card) {
+  position: relative;
+}
+body:is(.scene-rain, .scene-blackhole, .scene-minecraft) :is(.hero, .ed-side, .source-card, .topbar, .settings-dialog, .small-dialog, .ai-popover, .context-menu) {
+  isolation: isolate;
+}
+body:is(.scene-rain, .scene-blackhole) :is(.hero, .ed-side, .source-card)::after {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; border-radius: inherit;
   background-image: var(--material); background-size: 320px 320px;
 }
-body.scene-rain :is(.hero, .ed-side, .source-card, .settings-dialog)::after { opacity: .65; }
-body.scene-blackhole :is(.hero, .ed-side, .source-card, .settings-dialog)::after { opacity: .75; mix-blend-mode: screen; animation: twinkle 4s ease-in-out infinite; }
-@keyframes twinkle { 50% { opacity: .4; } }
-body:is(.scene-rain, .scene-blackhole) :is(.hero, .ed-side) > * { position: relative; z-index: 1; }
-body:is(.scene-rain, .scene-blackhole) .hero::before {
-  background: radial-gradient(340px circle at var(--mx, -999px) var(--my, -999px), rgba(var(--glow), calc(.12 + .14 * var(--scene-pulse))), transparent 70%) fixed;
-  opacity: 1;
+body.scene-rain :is(.hero, .ed-side, .source-card)::after { opacity: .65; }
+body.scene-blackhole :is(.hero, .ed-side, .source-card)::after { opacity: .46; }
+body:is(.scene-rain, .scene-blackhole) .hero::before { display: none; }
+body:is(.scene-rain, .scene-blackhole) :is(.topbar, .settings-dialog, .ai-popover, .context-menu) {
+  background-image: var(--material);
+  background-size: 320px;
 }
-body:is(.scene-rain, .scene-blackhole) .topbar { background-image: var(--material); background-size: 320px; }
-@media (prefers-reduced-motion: reduce) {
-  body.scene-blackhole :is(.hero, .ed-side, .source-card, .settings-dialog)::after { animation: none; }
+body.scene-blackhole :is(.tab:not(.platform-tab), .jobs-btn, .ai-status, .settings-tabs button, .context-menu button) {
+  background-color: color-mix(in srgb, var(--panel) 92%, var(--bg-2));
+  background-image: var(--material);
+  background-size: 185px;
 }
+body.scene-blackhole :is(.tab:not(.platform-tab), .jobs-btn, .ai-status, .settings-tabs button, .context-menu button):hover {
+  background-color: var(--panel-2);
+}
+body.scene-blackhole :is(.tab.active:not(.platform-tab), .jobs-btn.active-view, .settings-tabs button[aria-selected="true"]) {
+  background-color: color-mix(in srgb, var(--bg-2) 78%, var(--accent));
+}
+.surface-pointer-light {
+  position: absolute; inset: 0; border-radius: inherit; z-index: -1; pointer-events: none;
+  background: radial-gradient(115px circle at var(--pointer-x) var(--pointer-y), rgba(var(--glow), .15), transparent 100%);
+}
+.block-particles {
+  position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none;
+  border: 0; padding: 0; margin: 0; overflow: hidden; background: transparent; pointer-events: none;
+}
+.block-particles::backdrop { pointer-events: none; }
+.block-particles i { position: absolute; background: currentColor; box-shadow: inset 1px 1px #fff3, inset -1px -1px #0004; }

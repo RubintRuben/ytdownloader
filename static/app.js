@@ -454,6 +454,7 @@ function makeVideoCard(it, i) {
     loadFromUrl(it.url);
   });
   card.querySelector(".yt-title").addEventListener("click", () => loadFromUrl(it.url));
+  hintVideoCard(card.querySelector(".yt-thumb"), it);
   const openChannel = () => it.channelId && openYtChannel(it.channelId, it.uploader, { thumbnail: it.avatar, verified: it.verified });
   card.querySelector(".yt-avatar").addEventListener("click", openChannel);
   card.querySelector(".yt-channel")?.addEventListener("click", openChannel);
@@ -499,6 +500,7 @@ function makeShortCard(it, i) {
     loadFromUrl(it.url);
   });
   card.querySelector("h3").addEventListener("click", () => loadFromUrl(it.url));
+  hintVideoCard(card.querySelector(".short-thumb"), it);
   card.querySelector(".yt-more").addEventListener("click", (event) => openCardMenu(event.currentTarget, it));
   return card;
 }
@@ -807,6 +809,41 @@ function escapeHtml(s) {
 
 // --- info lekérés (link vagy találat → editor) -----------------------------
 
+let hintedVideo = null;
+async function requestVideoInfo(url, source) {
+  const params = new URLSearchParams({ url, source });
+  const response = await fetch(`${API}/api/info?${params}`, { signal: AbortSignal.timeout(42000) });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.detail || "A videó adatai nem érhetők el.");
+  return data;
+}
+
+function hintVideoInfo(url) {
+  if (!looksLikeUrl(url) || youtubeChannelRef(url) || sourceUrlError(url, currentTab)) return;
+  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+  if (hintedVideo && (!hintedVideo.finished || (hintedVideo.url === url &&
+      hintedVideo.source === currentTab && performance.now() - hintedVideo.finished < 30000))) return;
+  const hint = hintedVideo = { url, source: currentTab, finished: 0 };
+  hint.promise = requestVideoInfo(url, hint.source).then(data => {
+    hint.finished = performance.now();
+    return data;
+  }).catch(() => {
+    if (hintedVideo === hint) hintedVideo = null;
+    return null;
+  });
+}
+
+function hintVideoCard(button, item) {
+  if (!item.url || item.live) return;
+  let timer;
+  button.addEventListener("pointerenter", event => {
+    if (event.pointerType === "mouse") timer = setTimeout(() => hintVideoInfo(item.url), 300);
+  });
+  button.addEventListener("pointerleave", () => clearTimeout(timer));
+}
+
+urlInput.addEventListener("paste", () => setTimeout(() => hintVideoInfo(urlInput.value.trim()), 0));
+
 async function loadFromUrl(url, keepListEdit) {
   const sourceError = sourceUrlError(url, currentTab);
   if (sourceError) { showStatus(sourceError, "error"); return false; }
@@ -820,10 +857,13 @@ async function loadFromUrl(url, keepListEdit) {
   setLoading(true);
   showStatus("Betöltés…", "loading");
   try {
-    const res = await fetch(`${API}/api/info?url=` + encodeURIComponent(url) + "&source=" + currentTab);
-    const data = await res.json();
+    const source = currentTab;
+    const hint = hintedVideo?.url === url && hintedVideo.source === source &&
+      (!hintedVideo.finished || performance.now() - hintedVideo.finished < 30000) ? hintedVideo : null;
+    const warmed = hint ? await hint.promise : null;
     if (infoToken !== searchToken) return false;
-    if (!res.ok) throw new Error(data.detail || "Hiba történt.");
+    const data = warmed || await requestVideoInfo(url, source);
+    if (infoToken !== searchToken) return false;
     info = data;
     isInstagram = data.source === "instagram";
     isYoutube = data.source === "youtube";
@@ -899,9 +939,9 @@ function openEditor(url) {
   window.playerHooks?.load(info);
 
   // a filmstrip: YouTube-nál storyboard-kockák, máshol üres (a sima csík marad)
+  setupDirectPlayer();
   buildFilmstrip();
   requestAnimationFrame(layoutWindow);
-  setupDirectPlayer();
 }
 
 function updateTimelineDuration(seconds) {
@@ -998,16 +1038,21 @@ function setupDirectPlayer(refresh = false, startAt = 0, autoplay = false) {
   }, { once: true });
 
   function switchSource() {
-    if (!active()) return;
+    if (!active() || mode === "preparing-file") return;
     const target = pendingPreviewSeek ?? igVideo.currentTime;
     previewWantPlay ||= !igVideo.paused;
     if (target > 0) pendingPreviewSeek = target;
+    if (mode === "cached") {
+      info.previewCached = false;
+      loadPreferredSource(target);
+      return;
+    }
     if (mode === "direct" && canStream()) {
       loadStream(target);
       return;
     }
     if (mode !== "file") {
-      mode = "file";
+      mode = "preparing-file";
       streamController?.abort();
       igVideo.pause();
       igVideo.hidden = true;
@@ -1038,7 +1083,7 @@ function setupDirectPlayer(refresh = false, startAt = 0, autoplay = false) {
     setNotice("Előnézet betöltése…");
     const limit = duration > 0 ? duration - 0.15 : target;
     const start = Math.max(0, Math.min(target, limit));
-    waitForMedia(11000);
+    waitForMedia(7500);
     const streamUrl = API + info.streamUrl + (audioLang ? "?audio=" + encodeURIComponent(audioLang) : "");
     attachPreviewStream(igVideo, streamUrl, start, duration, hasAudio, stream.signal)
       .catch(() => { if (!stream.signal.aborted) switchSource(); });
@@ -1075,9 +1120,10 @@ function setupDirectPlayer(refresh = false, startAt = 0, autoplay = false) {
     if (!active()) return;
     clearTimeout(mediaTimer);
     pendingPreviewSeek = null;
+    retryButton.hidden = true;
     poster.hidden = true;
     setNotice(hasAudio ? "" : "A forrásvideó nem tartalmaz hangsávot.");
-    if (mode === "file" && !framesStarted && !info.storyboard) {
+    if ((mode === "file" || mode === "cached") && !framesStarted && !info.storyboard) {
       framesStarted = true;
       buildPreviewFilmstrip(igVideo.currentSrc, generation);
     }
@@ -1102,7 +1148,7 @@ function setupDirectPlayer(refresh = false, startAt = 0, autoplay = false) {
     let retry = refresh;
     while (active()) {
       try {
-        const params = new URLSearchParams({ url: edUrl.textContent });
+        const params = new URLSearchParams({ url: edUrl.textContent, wait: "true" });
         if (retry) params.set("retry", "true");
         const response = await fetch(API + "/api/preview/status?" + params, {
           signal: AbortSignal.any([signal, AbortSignal.timeout(12000)]), cache: "no-store"
@@ -1114,11 +1160,8 @@ function setupDirectPlayer(refresh = false, startAt = 0, autoplay = false) {
         errors = 0;
         if (data.status === "error") { fail(data.message); return; }
         if (data.status === "ready") {
-          hasAudio = data.hasAudio !== false;
           updateTimelineDuration(data.duration);
-          igVideo.hidden = false;
-          igVideo.src = API + info.previewUrl;
-          waitForMedia(12000);
+          loadFile("file", data.hasAudio, pendingPreviewSeek);
           return;
         }
         setNotice(data.message || "Előnézet előkészítése…");
@@ -1126,7 +1169,33 @@ function setupDirectPlayer(refresh = false, startAt = 0, autoplay = false) {
         if (!active()) return;
         if (++errors >= 3) { fail("Megszakadt az előnézet kapcsolata. Kattints az Újratöltésre."); return; }
       }
-      await new Promise(resolve => setTimeout(resolve, 850));
+      await new Promise(resolve => setTimeout(resolve, 220));
+    }
+  }
+
+  function loadFile(kind, audio, target) {
+    mode = kind;
+    hasAudio = audio !== false;
+    if (target > 0) pendingPreviewSeek = target;
+    igVideo.hidden = false;
+    igVideo.src = API + info.previewUrl;
+    waitForMedia(kind === "cached" ? 1800 : 9000);
+  }
+
+  function loadPreferredSource(target) {
+    if (audioLang && canStream()) {
+      loadStream(target);
+    } else if (info.directUrl) {
+      mode = "direct";
+      hasAudio = true;
+      igVideo.hidden = false;
+      if (target > 0) pendingPreviewSeek = target;
+      igVideo.src = API + info.directUrl;
+      waitForMedia(canStream() ? 2700 : 4800);
+    } else if (canStream()) loadStream(target);
+    else {
+      mode = undefined;
+      switchSource();
     }
   }
 
@@ -1135,22 +1204,14 @@ function setupDirectPlayer(refresh = false, startAt = 0, autoplay = false) {
     if (refresh) {
       try {
         const params = new URLSearchParams({ url: edUrl.textContent, refresh: "true" });
-        const response = await fetch(API + "/api/info?" + params, { signal });
+        const response = await fetch(API + "/api/info?" + params, { signal: AbortSignal.any([signal, AbortSignal.timeout(16000)]) });
         const updated = response.ok && await response.json();
         if (updated && active()) Object.assign(info, updated);
-      } catch { /* The stored fallback URL can still be used. */ }
+      } catch { /* The compatible preview can still be prepared independently. */ }
     }
     if (!active()) return;
-    if (audioLang && canStream()) {
-      loadStream(startAt);
-    } else if (info.directUrl) {
-      mode = "direct";
-      igVideo.hidden = false;
-      if (startAt > 0) pendingPreviewSeek = startAt;
-      igVideo.src = API + info.directUrl;
-      waitForMedia(5000);
-    } else if (canStream()) loadStream(startAt);
-    else switchSource();
+    if (!refresh && !audioLang && info.previewCached) loadFile("cached", info.previewHasAudio, startAt);
+    else loadPreferredSource(startAt);
   }
 
   start();

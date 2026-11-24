@@ -29,7 +29,7 @@ A beállításokat az oldalsáv tetején lévő **fogaskerék** nyitja meg. A h�
 - **Minecraft** · rilw. [Minecraft Scene](https://steamcommunity.com/sharedfiles/filedetails/?id=2078716698)
 - **Eső** · Zanji. A fénytöréses esőeffektus Lucas Bebber munkája. [Cyberpunk City Fisherman Rain Effects](https://steamcommunity.com/sharedfiles/filedetails/?id=1218076433) · [Codrops RainEffect](https://github.com/codrops/RainEffect)
 
-A **Saját hátterek** alatt képet, videót vagy Wallpaper Engine-hátteret adhatsz hozzá. Az animált témák hátterét külön is lecserélheted és visszaállíthatod a beépítettre.
+A **Saját hátterek** alatt képet, videót vagy Wallpaper Engine-hátteret adhatsz hozzá. A beépített animált témák az eredeti hátterükkel jelennek meg.
 
 Az ablak a Windows saját mozgatását és átméretezését használja: a képernyő tetejére húzva teljes méretű lesz, onnan lehúzva visszaáll, és működik az Aero Snap (oldalra húzás, Win+nyilak).
 

@@ -22,7 +22,6 @@
 [data-theme="minecraft"] body, [data-theme="minecraft"] :is(button, input, select, textarea) { font-family: var(--mc-font); }
 [data-theme="minecraft"] *, [data-theme="minecraft"] *::before, [data-theme="minecraft"] *::after { border-radius: 0 !important; }
 [data-theme="minecraft"] :is(img, video, canvas, .yt-thumb, .short-thumb, .g-thumb) { image-rendering: auto; }
-.bg-layer canvas.pixel { image-rendering: pixelated; }
 
 /* --- szöveg --- */
 [data-theme="minecraft"] :is(h1, h2, h3, strong, .yt-title, .tab, .jobs-btn, .btn-primary, .btn-download, .btn-list, .seg, .q-chip) {
@@ -61,7 +60,7 @@
 
 /* --- gombok: kő-textúra, fekete keret, domború él; rámutatva fehér keret és sárgás szöveg --- */
 [data-theme="minecraft"] :is(.btn-primary, .btn-download, .btn-list, .jobs-btn, .tab:not(.platform-tab), .seg, .q-chip, .icon-btn,
-  .side-icon-btn, .ai-status, .preview-control, .yt-sub-btn, .yt-pill, .copy-btn, .sel-btn, .tile-tools button, .channel-back,
+  .side-icon-btn, .ai-status, .preview-control, .yt-sub-btn, .yt-pill, .copy-btn, .sel-btn, .channel-back,
   .paste-button, .jc-save, .list-tool-btn, .shorts-toggle, .clip-chip, .format-cards .seg, .choice-cards button, .ai-picker button,
   .settings-tabs button, .ai-toggle, .yt-channel-tabs button, .update-shortcut, .window-controls button, .titlebar-btn, .yt-quick, .link-btn) {
   background: var(--mc-stone) 0 0 / 32px 32px !important; image-rendering: pixelated;
@@ -69,7 +68,7 @@
   text-shadow: var(--mc-shadow); transition: none !important; filter: none !important;
 }
 [data-theme="minecraft"] :is(.btn-primary, .btn-download, .btn-list, .jobs-btn, .tab:not(.platform-tab), .seg, .q-chip, .icon-btn,
-  .side-icon-btn, .ai-status, .preview-control, .yt-sub-btn, .yt-pill, .copy-btn, .sel-btn, .tile-tools button, .channel-back,
+  .side-icon-btn, .ai-status, .preview-control, .yt-sub-btn, .yt-pill, .copy-btn, .sel-btn, .channel-back,
   .paste-button, .jc-save, .list-tool-btn, .shorts-toggle, .clip-chip, .format-cards .seg, .choice-cards button, .ai-picker button,
   .settings-tabs button, .ai-toggle, .yt-channel-tabs button, .update-shortcut, .titlebar-btn, .link-btn):hover:not(:disabled) {
   border-color: #fff !important; color: #ffffa0 !important;

@@ -159,6 +159,27 @@ def _particle_kind(path: str) -> str | None:
     return next((kind for needle, kind in PARTICLE_KINDS if needle in name), None)
 
 
+def _particle_motion(files, path, kind, origin, scale, override, width, height) -> dict:
+    preset = json.loads(files.get(path, b"{}"))
+    emitter = (preset.get("emitter") or [{}])[0]
+    initial = {item["name"]: item for item in (preset.get("initializer") or [])}
+    defaults = (9, 5, 72) if kind == "leaves" else (14, .2, 925)
+    life = initial.get("lifetimerandom", {})
+    size = initial.get("sizerandom", {})
+    velocity = initial.get("velocityrandom", {})
+    minimum, maximum = _vec(velocity.get("min")), _vec(velocity.get("max"))
+    offset = _vec(emitter.get("origin"))
+    return {
+        "position": [(origin[0] + offset[0] * scale[0]) / width, (origin[1] + offset[1] * scale[1]) / height],
+        "velocity": [(minimum[i] + maximum[i]) * scale[i] / (2 * span)
+                     for i, span in enumerate((width, height))],
+        "lifetime": (float(life.get("min", defaults[0])) + float(life.get("max", defaults[0]))) / 2,
+        "rate": float(emitter.get("rate", defaults[1])) * float(override.get("rate", 1)) * float(override.get("count", 1)),
+        "size": (float(size.get("min", defaults[2])) + float(size.get("max", defaults[2]))) / 2 / height,
+        "start": float(preset.get("starttime") or 0),
+    }
+
+
 def convert(project_dir: Path, out_dir: Path) -> dict:
     """Write the decoded layer images and a scene.json descriptor for the renderer."""
     project = json.loads((project_dir / "project.json").read_text(encoding="utf-8-sig"))
@@ -216,7 +237,8 @@ def convert(project_dir: Path, out_dir: Path) -> dict:
                 elif "shine" in name or "godray" in name:
                     ray = (passes[1].get("constantshadervalues") if len(passes) > 1 else {}) or {}
                     layer["shine"] = {"intensity": float(ray.get("rayintensity", .5)), "length": float(ray.get("raylength", .1)),
-                                      "noise": float(values.get("noiseamount", .2))}
+                                      "threshold": float(values.get("raythreshold", .85)),
+                                      "direction": float(ray.get("direction", 0))}
             layers.append(layer)
         elif obj.get("particle"):
             kind = _particle_kind(obj["particle"])
@@ -224,11 +246,17 @@ def convert(project_dir: Path, out_dir: Path) -> dict:
                 continue
             override = obj.get("instanceoverride") or {}
             color = _vec(override.get("colorn"), (1, 1, 1))
-            particles.append({"type": kind, "x": origin[0] / width, "y": origin[1] / height,
+            particle = {"type": kind, "x": origin[0] / width, "y": origin[1] / height,
                               "scale": [abs(scale[0]), abs(scale[1])],
                               "rate": float(override.get("rate", 1)), "speed": float(override.get("speed", 1)),
                               "count": float(override.get("count", 1)), "size": float(override.get("size", 1)),
-                              "alpha": float(override.get("alpha", 1)), "color": color})
+                              "alpha": float(override.get("alpha", 1)), "color": color}
+            if kind in ("leaves", "shafts"):
+                try:
+                    particle["motion"] = _particle_motion(files, obj["particle"], kind, origin, scale, override, width, height)
+                except (ValueError, TypeError, KeyError):
+                    pass
+            particles.append(particle)
     if not layers:
         raise ValueError("A scene nem tartalmaz megjeleníthető képréteget.")
     descriptor = {"title": project.get("title") or project_dir.name, "aspect": width / height,

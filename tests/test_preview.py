@@ -58,6 +58,28 @@ class UniversalPreviewTests(unittest.TestCase):
         self.assertEqual(app._ig_play_url({'formats':[silent, audible]}), audible['url'])
         self.assertIsNone(app._ig_play_url({'formats':[{**audible, 'protocol':'m3u8_native'}]}))
 
+    def test_browser_compatible_webm_can_play_without_transcoding(self):
+        fmt = {"url": "https://cdn.example/movie.webm", "height": 360, "protocol": "https",
+               "ext": "webm", "vcodec": "vp9", "acodec": "opus"}
+        self.assertEqual(app._direct_preview_format({"formats": [fmt]}), fmt)
+        self.assertEqual(app._browser_preview_type(fmt), "video/webm")
+        self.assertIsNone(app._direct_preview_format({"formats": [{**fmt, "acodec": "none"}]}))
+
+    def test_metadata_prefers_an_existing_compatible_preview(self):
+        async def run():
+            url = "https://example.org/cached-preview"
+            with tempfile.TemporaryDirectory() as folder:
+                output = Path(folder) / "preview.mp4"
+                output.touch()
+                with patch.dict(app._preview_cache, {url: output}), patch.dict(app._preview_state, {url: {"hasAudio": False}}):
+                    with patch.object(app, "get_info", new=AsyncMock(return_value={"duration": 1})):
+                        data = await app.api_info(url)
+                        self.assertTrue(data["previewCached"])
+                        self.assertFalse(data["previewHasAudio"])
+                        output.unlink()
+                        self.assertFalse((await app.api_info(url))["previewCached"])
+        asyncio.run(run())
+
     def test_all_sources_get_fallback_even_without_duration(self):
         async def run():
             for url, source in [('https://www.instagram.com/reels/example/', 'instagram'), ('https://vimeo.com/123', 'other'), ('https://www.youtube.com/watch?v=test', 'youtube')]:

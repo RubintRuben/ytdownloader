@@ -44,22 +44,20 @@
   let updatePoll;
   let checkInterval;
   let native;
-  let wallpaperTarget;
   let settings = window.appSettings = { custom_themes: [] };
-  const videoStatus = {};
+  const themeStatus = {};
 
   // --- téma-csempék ---------------------------------------------------------------
   function tile(key, [name, description], container, kind) {
-    const button = document.createElement("div");
+    const button = document.createElement("button");
+    button.type = "button";
     button.className = "theme-tile" + (kind === "animated" ? " animated" : "");
     button.dataset.value = key;
-    button.tabIndex = 0;
-    button.setAttribute("role", "button");
     const swatch = document.createElement("span");
     swatch.className = "theme-swatch";
     swatch.dataset.theme = key;
     swatch.setAttribute("aria-hidden", "true");
-    swatch.innerHTML = kind === "animated" ? `<video muted loop playsinline preload="none"></video><img alt="" hidden>` : "<i></i><b></b><em></em>";
+    swatch.innerHTML = kind === "animated" ? `<img src="${API}/api/theme-video/${key}/preview" alt="">` : "<i></i><b></b><em></em>";
     const caption = document.createElement("span");
     caption.className = "tile-caption";
     caption.innerHTML = `<strong></strong><small></small>`;
@@ -67,36 +65,13 @@
     caption.querySelector("small").textContent = description;
     button.append(swatch, caption);
     if (kind === "animated") {
-      const tools = document.createElement("span");
-      tools.className = "tile-tools";
-      tools.innerHTML = `<button type="button" data-act="video" title="Saját videó vagy Wallpaper Engine háttér ehhez a témához">Saját háttér…</button>
-        <button type="button" data-act="reset" title="Vissza a beépített háttérre" hidden>Alap</button>`;
-      button.append(tools);
       const status = document.createElement("em");
       status.className = "tile-status";
       button.append(status);
     }
-    const choose = (event) => {
-      if (event.target.closest("[data-act]")) return;
+    button.addEventListener("click", () => {
       changedTheme = true;
       applyTheme(key, true);
-    };
-    button.addEventListener("click", choose);
-    button.addEventListener("keydown", (e) => { if (e.target === button && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); choose(e); } });
-    button.addEventListener("click", async (event) => {
-      const act = event.target.closest("[data-act]")?.dataset.act;
-      if (act === "video") {
-        showContextMenu(event.target.closest("[data-act]"), [
-          { label: "Wallpaper Engine háttér…", action: () => openWallpaperEngine(key) },
-          { label: "Videó vagy project.json fájl…", action: () => pickAnimatedBackground(key) },
-        ]);
-      } else if (act === "reset") {
-        try {
-          const status = await postJSON(`${API}/api/theme-video/${key}/reset`);
-          updateVideoTile(key, status);
-          if (themePreference === key) applyTheme(key);
-        } catch (error) { toast(error.message, [], "error"); }
-      }
     });
     container.append(button);
     return button;
@@ -104,59 +79,24 @@
   for (const [key, value] of Object.entries(animatedThemes)) tile(key, value, $("animatedThemeGrid"), "animated");
   for (const [key, value] of Object.entries(themes)) tile(key, value, $("themeGrid"), "classic");
 
-  async function pickAnimatedBackground(scene) {
-    if (!native?.pick_theme_video) { toast("Ez az asztali alkalmazásban érhető el.", [], "error"); return; }
-    const result = await native.pick_theme_video(scene);
-    if (result?.error) toast(result.error, [], "error");
-    if (result?.ok) {
-      updateVideoTile(scene, result.status);
-      if (result.status.state === "processing") pollVideo(scene);
-      else if (themePreference === scene) applyTheme(scene);
-    }
-  }
-
-  function updateVideoTile(scene, status) {
-    videoStatus[scene] = status;
-    const tileEl = document.querySelector(`.theme-tile[data-value="${scene}"]`);
-    if (!tileEl || !status) return;
-    const label = tileEl.querySelector(".tile-status");
-    label.textContent = status.state === "processing" ? "Előkészítés…" : status.state === "error" ? "Nem érhető el" : (status.custom || "");
-    label.title = status.message || status.custom || "";
-    tileEl.querySelector('[data-act="reset"]').hidden = !status.custom;
-    const video = tileEl.querySelector("video");
-    const still = tileEl.querySelector(".theme-swatch img");
-    const showVideo = status.state === "ready" && status.kind === "video";
-    video.hidden = !showVideo;
-    still.hidden = showVideo || (status.kind !== "scene" && status.kind !== "web");
-    if (showVideo) {
-      const src = `${API}/api/theme-video/${scene}?v=${status.version}`;
-      if (video.getAttribute("src") !== src) video.src = src;
-      if (dialog.open) video.play().catch(() => {});
-    } else if (!still.hidden) {
-      const src = `${API}/api/theme-video/${scene}/preview?v=${status.version || status.state}`;
-      if (still.getAttribute("src") !== src) still.src = src;
-    }
+  function updateAnimatedTile(scene, status) {
+    if (!status?.state) return;
+    themeStatus[scene] = status;
+    const label = document.querySelector(`.theme-tile[data-value="${scene}"] .tile-status`);
+    label.textContent = status.state === "error" ? "Nem érhető el" : "";
+    label.title = status.message || "";
     renderCredits();
   }
-  window.addEventListener("theme-video-status", (e) => updateVideoTile(e.detail.scene, e.detail));
-  function pollVideo(scene) {
-    setTimeout(async () => {
-      const status = await fetch(`${API}/api/theme-video/${scene}/status`).then(r => r.json()).catch(() => null);
-      updateVideoTile(scene, status);
-      if (status?.state === "processing") pollVideo(scene);
-      else if (status && ["ready", "available"].includes(status.state) && themePreference === scene) applyTheme(scene);
-      if (status?.message) toast(status.message, [], "error");
-    }, 1500);
-  }
-  async function loadVideoStatuses() {
+  window.addEventListener("theme-video-status", (e) => updateAnimatedTile(e.detail.scene, e.detail));
+  async function loadAnimatedStatuses() {
     for (const scene of Object.keys(animatedThemes)) {
-      updateVideoTile(scene, await fetch(`${API}/api/theme-video/${scene}/status`).then(r => r.json()).catch(() => null));
+      updateAnimatedTile(scene, await fetch(`${API}/api/theme-video/${scene}/status`).then(r => r.json()).catch(() => null));
     }
   }
   function renderCredits() {
     const list = $("themeCredits");
     list.replaceChildren(...Object.keys(animatedThemes).map(scene => {
-      const s = videoStatus[scene];
+      const s = themeStatus[scene];
       const li = document.createElement("li");
       if (!s) return li;
       li.textContent = `${animatedThemes[scene][0]} · ${s.title}`;
@@ -171,10 +111,6 @@
       return li;
     }));
   }
-  // előnézet csak a megnyitott beállításokban fut
-  dialog.addEventListener("close", () => document.querySelectorAll(".theme-tile video").forEach(v => v.pause()));
-  function playPreviews() { document.querySelectorAll(".theme-tile video[src]").forEach(v => v.play().catch(() => {})); }
-
   // --- saját témák -------------------------------------------------------------------
   function renderCustomThemes() {
     const grid = $("customThemeGrid");
@@ -212,7 +148,7 @@
     add.setAttribute("aria-haspopup", "menu");
     add.innerHTML = `<span class="plus" aria-hidden="true"><svg class="line-icon" viewBox="0 0 24 24" width="24" height="24"><path d="M12 5v14M5 12h14"/></svg></span><span class="tile-caption"><strong>Új háttér</strong><small>Kép, videó, Wallpaper Engine</small></span>`;
     add.addEventListener("click", () => showContextMenu(add, [
-      { label: "Kép vagy videó…", action: pickBackground },
+      { label: "Kép vagy videó…", action: () => pickBackground() },
       { label: "Wallpaper Engine háttér…", action: () => openWallpaperEngine() },
     ]));
     grid.append(add);
@@ -226,11 +162,13 @@
     renderCustomThemes();
   }
 
-  async function pickBackground() {
+  async function pickBackground(project = false) {
     if (!native?.pick_background) { toast("Ez az asztali alkalmazásban érhető el.", [], "error"); return; }
-    const result = await native.pick_background();
-    if (result?.error) { toast(result.error, [], "error"); return; }
-    if (result?.ok) await added(result.theme);
+    try {
+      const result = await native.pick_background(project);
+      if (result?.error) toast(result.error, [], "error");
+      if (result?.ok) await added(result.theme);
+    } catch (error) { toast(error.message || "A fájlválasztó nem nyitható meg.", [], "error"); }
   }
 
   async function added(theme) {
@@ -345,11 +283,9 @@
   });
 
   // --- Wallpaper Engine böngésző ---
-  async function openWallpaperEngine(targetScene) {
-    wallpaperTarget = targetScene;
+  async function openWallpaperEngine() {
     const grid = $("weGrid");
     $("weStatus").textContent = "";
-    $("weTitle").textContent = targetScene ? `Wallpaper Engine háttér – ${animatedThemes[targetScene][0]} téma` : "Wallpaper Engine hátterek";
     grid.innerHTML = `<p class="pane-hint">Keresés a Steam-könyvtárakban…</p>`;
     $("weDialog").showModal();
     try {
@@ -368,16 +304,6 @@
           card.classList.add("busy");
           $("weStatus").textContent = "Importálás…";
           try {
-            if (targetScene) {
-              const status = await postJSON(`${API}/api/theme-video/${targetScene}/wallpaper`, { path: item.path });
-              $("weDialog").close();
-              $("weStatus").textContent = "";
-              updateVideoTile(targetScene, status);
-              if (status.state === "processing") pollVideo(targetScene);
-              changedTheme = true;
-              applyTheme(targetScene, true);
-              return;
-            }
             const theme = await postJSON(`${API}/api/wallpaper-engine/import`, { path: item.path });
             $("weDialog").close();
             $("weStatus").textContent = "";
@@ -396,8 +322,7 @@
   $("weClose").addEventListener("click", () => $("weDialog").close());
   $("weBrowse").addEventListener("click", () => {
     $("weDialog").close();
-    if (wallpaperTarget) pickAnimatedBackground(wallpaperTarget);
-    else pickBackground();
+    pickBackground(true);
   });
   window.openWallpaperEngine = openWallpaperEngine;
 
@@ -447,7 +372,7 @@
     for (const tab of dialog.querySelectorAll("[role=tab][data-pane]")) tab.setAttribute("aria-selected", String(tab.dataset.pane === name));
     for (const pane of dialog.querySelectorAll(".settings-pane")) pane.hidden = pane.dataset.pane !== name;
     if (name === "ai") loadMcp();
-    if (name === "look") { playPreviews(); loadVideoStatuses(); }
+    if (name === "look") loadAnimatedStatuses();
   }
   dialog.querySelector(".settings-tabs").addEventListener("click", (event) => {
     const tab = event.target.closest("[role=tab]");
@@ -681,7 +606,7 @@
     applyTheme(stored === "deepsea" ? "minecraft" : stored);
   } catch { applyTheme("dark"); }
   loadSettings();
-  loadVideoStatuses();
+  loadAnimatedStatuses();
 
   async function connectNativeSettings() {
     if (native || !window.pywebview?.api?.update_status) return;
