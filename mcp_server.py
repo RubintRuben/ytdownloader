@@ -224,6 +224,8 @@ def create_router(handlers: dict[str, Callable[[dict], Awaitable[str]]],
             return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32002, "message": "Disconnected by the user."}},
                                 status_code=404, headers={"X-Downloader-Revoked": "1"})
         session = sessions.touch(session_id)
+        if session_id and not session:
+            return Response(status_code=404)
         transport = "stdio" if request.headers.get("x-mcp-transport") == "stdio" else "http"
         try:
             body = await request.json()

@@ -571,8 +571,22 @@ async function copyText(text, message) {
   catch { toast("Nem sikerült a vágólapra másolni.", [], "error"); }
 }
 
+function positionPopover(panel, anchor, alignEnd = false) {
+  const rect = anchor.getBoundingClientRect();
+  const spaceBelow = innerHeight - rect.bottom - 12;
+  const spaceAbove = rect.top - 12;
+  const below = panel.scrollHeight + 2 <= spaceBelow || spaceBelow >= spaceAbove;
+  panel.style.setProperty("--popover-space", Math.max(0, below ? spaceBelow : spaceAbove) + "px");
+  const left = alignEnd ? rect.right - panel.offsetWidth : rect.left;
+  panel.style.left = Math.max(8, Math.min(left, innerWidth - panel.offsetWidth - 8)) + "px";
+  if (!below) panel.style.setProperty("--popover-top", "8px");
+  panel.style.setProperty("--popover-top", (below ? rect.bottom + 4 : rect.top - panel.offsetHeight - 4) + "px");
+}
+
 function showContextMenu(anchor, items) {
   const menu = $("contextMenu");
+  hideContextMenu();
+  (anchor.closest("dialog") || document.body).append(menu);
   menu.replaceChildren(...items.map(item => {
     const button = document.createElement("button");
     button.type = "button";
@@ -582,20 +596,13 @@ function showContextMenu(anchor, items) {
     button.addEventListener("click", () => { hideContextMenu(); item.action(); });
     return button;
   }));
-  menu.hidden = false;
-  const rect = anchor.getBoundingClientRect();
-  const width = menu.offsetWidth, height = menu.offsetHeight;
-  const left = Math.min(window.innerWidth - width - 8, Math.max(8, rect.right - width));
-  const top = rect.bottom + height + 8 > window.innerHeight ? rect.top - height - 4 : rect.bottom + 4;
-  menu.style.left = left + "px";
-  menu.style.top = Math.max(8, top) + "px";
+  menu.showPopover({ source: anchor });
+  positionPopover(menu, anchor, true);
   menu.querySelector("button")?.focus({ preventScroll: true });
 }
-function hideContextMenu() { $("contextMenu").hidden = true; }
-document.addEventListener("pointerdown", (event) => {
-  if (!event.target.closest("#contextMenu, .yt-more, .g-more")) hideContextMenu();
-}, true);
+function hideContextMenu() { $("contextMenu").hidePopover(); }
 window.addEventListener("blur", hideContextMenu);
+window.addEventListener("resize", hideContextMenu);
 
 // --- toast értesítések ---
 function toast(message, actions = [], type = "") {
@@ -2420,6 +2427,7 @@ async function pulse() {
     lastLibraryRev = data.library;
     renderApprovals(data.approvals || []);
     renderAiStatus(data.ai || [], data.mcpMode);
+    if ($("aiPopover").matches(":popover-open")) loadAiPopover();
   } catch { /* the server restarts during updates */ }
 }
 setInterval(pulse, 1500);
@@ -2509,7 +2517,7 @@ document.addEventListener("keydown", e => {
     urlInput.focus(); urlInput.select();
   }
   if (e.key === "Escape") {
-    if (!$("contextMenu").hidden) { hideContextMenu(); return; }
+    if ($("contextMenu").matches(":popover-open")) { e.preventDefault(); hideContextMenu(); return; }
     if (listPanel.classList.contains("open")) { closeList(); listBtn.focus(); }
     else if (jobsPanel.classList.contains("open")) { closeJobs(); jobsBtn.focus(); }
   }
@@ -2546,7 +2554,7 @@ function aiLogo(ai, cls = "ai-logo") {
   return AI_LABELS[ai] ? `<img class="${cls}" src="ai/${ai}.png" alt="${AI_LABELS[ai]}">`
     : `<span class="${cls} generic">AI</span>`;
 }
-let aiStatusKey = "";
+let aiStatusKey = "", aiPopoverKey = "", aiPopoverRequest = 0;
 function renderAiStatus(list, mode) {
   const key = JSON.stringify([list.map(x => x.id + x.ai), mode]);
   if (key === aiStatusKey) return;
@@ -2561,12 +2569,17 @@ function renderAiStatus(list, mode) {
   button.classList.toggle("connected", list.length > 0 && mode !== "off");
   button.classList.toggle("off", mode === "off");
   button.classList.toggle("full", mode === "full");
-  if (!$("aiPopover").hidden) loadAiPopover();
 }
 
 async function loadAiPopover() {
+  const request = ++aiPopoverRequest;
   let data;
   try { data = await (await fetch(`${API}/api/mcp/sessions`)).json(); } catch { return; }
+  if (request !== aiPopoverRequest) return;
+  const sessions = data.sessions || [];
+  const key = JSON.stringify([data.mode, data.blocked, data.log, sessions.map(({ seen, ...session }) => session)]);
+  if (key === aiPopoverKey) return;
+  aiPopoverKey = key;
   const modeNames = { off: "Kikapcsolva", ask: "Engedélyt kér", full: "Teljes hozzáférés" };
   $("aiModeChip").textContent = modeNames[data.mode] || "";
   $("aiModeChip").dataset.mode = data.mode;
@@ -2574,7 +2587,6 @@ async function loadAiPopover() {
     const minutes = Math.round((Date.now() / 1000 - t) / 60);
     return minutes < 1 ? "most" : minutes < 60 ? `${minutes} perce` : `${Math.round(minutes / 60)} órája`;
   };
-  const sessions = data.sessions || [];
   $("aiSessions").replaceChildren(...(sessions.length ? sessions.map(s => {
     const row = document.createElement("div");
     row.className = "ai-session" + (s.connected ? " live" : "");
@@ -2584,10 +2596,11 @@ async function loadAiPopover() {
     row.querySelector("strong").textContent = `${aiName(s.ai)} · ${s.label}${s.version ? " " + s.version : ""}`;
     row.querySelector("small").textContent = `${s.connected ? "Csatlakozva" : "Inaktív"} · ${since(s.started)} óta · ${s.calls} művelet${s.last ? " · utolsó: " + s.last : ""}`;
     row.querySelector("button").addEventListener("click", async () => {
-      await fetch(`${API}/api/mcp/sessions/${s.id}/disconnect`, { method: "POST" });
-      toast(`${aiName(s.ai)} lekapcsolva.`);
-      aiStatusKey = "";
-      loadAiPopover();
+      try {
+        const result = await postJSON(`${API}/api/mcp/sessions/${s.id}/disconnect`);
+        if (result.ok) toast(`${aiName(s.ai)} lekapcsolva.`);
+        pulse();
+      } catch (error) { toast(error.message, [], "error"); }
     });
     return row;
   }) : [Object.assign(document.createElement("p"), { className: "pane-hint", textContent: "Most egy AI sincs csatlakozva. A Beállítások → AI · MCP részen találod a csatlakozáshoz szükséges parancsot." })]));
@@ -2600,11 +2613,11 @@ async function loadAiPopover() {
     label.querySelector("input").addEventListener("change", async (event) => {
       const next = new Set(blocked);
       if (event.target.checked) next.delete(ai); else next.add(ai);
-      await window.updateAppSettings?.({ mcp_blocked: [...next] });
-      if (!event.target.checked) {
-        for (const s of sessions.filter(x => x.ai === ai)) await fetch(`${API}/api/mcp/sessions/${s.id}/disconnect`, { method: "POST" });
+      if (!await window.updateAppSettings?.({ mcp_blocked: [...next] })) {
+        event.target.checked = !blocked.has(ai);
+        return;
       }
-      loadAiPopover();
+      pulse();
     });
     return label;
   }));
@@ -2618,19 +2631,21 @@ async function loadAiPopover() {
     return li;
   })));
   if (!data.log?.length) $("aiActivity").innerHTML = `<li class="muted">Még nem volt AI-művelet.</li>`;
+  if ($("aiPopover").matches(":popover-open")) positionPopover($("aiPopover"), $("aiStatus"));
 }
 
-function toggleAiPopover(force) {
+$("aiStatus").addEventListener("click", () => {
   const pop = $("aiPopover");
-  const open = force ?? pop.hidden;
-  pop.hidden = !open;
-  $("aiStatus").setAttribute("aria-expanded", String(open));
-  if (open) loadAiPopover();
-}
-$("aiStatus").addEventListener("click", () => toggleAiPopover());
-$("aiOpenSettings").addEventListener("click", () => { toggleAiPopover(false); window.openSettings?.("ai"); });
-document.addEventListener("pointerdown", (event) => {
-  if (!$("aiPopover").hidden && !event.target.closest("#aiPopover, #aiStatus")) toggleAiPopover(false);
-}, true);
-document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !$("aiPopover").hidden) toggleAiPopover(false); });
+  if (pop.matches(":popover-open")) pop.hidePopover();
+  else {
+    pop.showPopover({ source: $("aiStatus") });
+    positionPopover(pop, $("aiStatus"));
+    loadAiPopover();
+  }
+});
+$("aiPopover").addEventListener("toggle", e => $("aiStatus").setAttribute("aria-expanded", String(e.newState === "open")));
+$("aiOpenSettings").addEventListener("click", () => { $("aiPopover").hidePopover(); window.openSettings?.("ai"); });
+window.addEventListener("resize", () => {
+  if ($("aiPopover").matches(":popover-open")) positionPopover($("aiPopover"), $("aiStatus"));
+});
 renderAiStatus([], "ask");

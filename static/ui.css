@@ -406,6 +406,10 @@ body.animated-bg .yt-channel-desc .more { background: transparent; }
 .small-dialog h2 { font: 700 20px var(--display-font); margin-bottom: 6px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .dialog-actions .btn-list { width: auto; margin: 0; padding: 9px 16px; }
+:is(.context-menu, .ai-popover) {
+  top: var(--popover-top, 8px);
+  max-height: min(var(--popover-space, 100dvh), calc(100dvh - var(--popover-top, 8px) - 8px));
+}
 .btn-primary.danger { background: #c0283f; border-color: #c0283f; color: #fff; box-shadow: none; }
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
 .field-grid label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--muted); }
@@ -413,8 +417,9 @@ body.animated-bg .yt-channel-desc .more { background: transparent; }
 .field-grid .time-input:focus { border-color: var(--accent); }
 .check-row { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 13px; color: var(--muted); }
 .context-menu {
-  position: fixed; z-index: 400; min-width: 230px; padding: 6px; border-radius: 12px; border: 1px solid var(--line-2);
-  background: color-mix(in srgb, var(--bg-2) 96%, transparent); box-shadow: 0 18px 48px #000a; animation: dialog-enter .12s var(--ease) both;
+  position: fixed; right: auto; bottom: auto; margin: 0; width: min(250px, calc(100vw - 16px)); overflow-y: auto;
+  padding: 6px; border-radius: 12px; border: 1px solid var(--line-2);
+  background: var(--bg-2); box-shadow: 0 18px 48px #000a;
 }
 .context-menu button {
   display: block; width: 100%; padding: 9px 12px; border: 0; border-radius: 8px; background: none; color: var(--text);
@@ -462,18 +467,7 @@ body.animated-bg .yt-channel-desc .more { background: transparent; }
 .theme-grid { margin-top: 0; }
 .theme-grid.animated { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .theme-grid.animated .theme-swatch { height: 78px; }
-.theme-swatch[data-theme="blackhole"] { background: radial-gradient(circle at 50% 55%, #000 15%, transparent 16%), radial-gradient(ellipse 48% 11% at 50% 55%, #ffd39b 0, #ff8a3d 45%, transparent 70%), radial-gradient(circle at 50% 45%, #ffb36b55 0 22%, transparent 23%), radial-gradient(circle at 20% 30%, #fff 0 1px, transparent 2px), radial-gradient(circle at 80% 20%, #fff 0 1px, transparent 2px), #05040a; }
-.theme-swatch[data-theme="minecraft"] { background: linear-gradient(#6fa8ff 0 45%, transparent 45%), repeating-linear-gradient(90deg, #5d9c35 0 10px, #4f8a2b 10px 20px) 0 45% / 100% 12% no-repeat, repeating-linear-gradient(90deg, #8a6243 0 10px, #7a553a 10px 20px) 0 57% / 100% 43% no-repeat, #8a6243; image-rendering: pixelated; }
-.theme-swatch[data-theme="rain"] { background: radial-gradient(circle at 25% 65%, #ff9f4a66 0 7px, transparent 12px), radial-gradient(circle at 65% 55%, #7aa2ff66 0 9px, transparent 14px), radial-gradient(circle at 85% 70%, #ff5fa266 0 6px, transparent 11px), repeating-linear-gradient(105deg, transparent 0 9px, #c8d2ff22 9px 10px), linear-gradient(#1c1a34, #08080f); }
-.theme-tile.animated .theme-swatch { background-size: 100% 100%; }
-.theme-tile.animated .theme-swatch i, .theme-tile.animated .theme-swatch b, .theme-tile.animated .theme-swatch em, .theme-tile.animated .theme-swatch s { display: none; }
-@media (prefers-reduced-motion: no-preference) {
-  .theme-swatch[data-theme="rain"] { animation: swatch-rain 1.2s linear infinite; }
-  .theme-swatch[data-theme="blackhole"] { animation: swatch-pulse 4s ease-in-out infinite; }
-  @keyframes swatch-drift { to { background-position: 200% 0, 0 0, 0 0, 0 0; } }
-  @keyframes swatch-rain { to { background-position: 0 0, 0 0, 0 0, 0 40px, 0 0; } }
-  @keyframes swatch-pulse { 50% { filter: brightness(1.25) saturate(1.2); } }
-}
+.theme-grid.animated .theme-swatch { background: var(--panel-2); }
 .custom-bg-row { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; align-items: start; }
 .custom-bg-preview { aspect-ratio: 16 / 10; border-radius: 12px; overflow: hidden; border: 1px dashed var(--line-2); display: grid; place-items: center; color: var(--muted); font-size: 12px; background: var(--panel); }
 .custom-bg-preview :is(img, video) { width: 100%; height: 100%; object-fit: cover; }
@@ -536,10 +530,6 @@ body.animated-bg .yt-channel-desc .more { background: transparent; }
   .gallery-tools input { width: 100%; max-width: none; }
   .selection-bar { left: 50%; bottom: 10px; flex-wrap: wrap; justify-content: center; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .bg-layer canvas { display: none; }
-}
-
 /* Keresés után a fejléc kompakt, rögzített keresősáv (mint a YouTube-on) */
 .landing.searching .workspace { position: sticky; top: 0; z-index: 20; padding-top: 12px; padding-bottom: 4px; }
 .landing.searching .hero { padding: 10px 12px; border-radius: 16px; flex-direction: row; align-items: center; gap: 12px; animation: none; }
@@ -585,9 +575,9 @@ body.animated-bg .yt-channel-desc .more { background: transparent; }
 .ai-status.off .ai-dot { background: #6b7280; }
 @keyframes ai-live { 50% { box-shadow: 0 0 0 6px #22c55e00; } }
 .ai-popover {
-  position: fixed; z-index: 120; left: 12px; top: calc(var(--titlebar) + 78px); width: 340px; max-height: calc(100vh - var(--titlebar) - 100px);
+  position: fixed; right: auto; bottom: auto; margin: 0; width: min(360px, calc(100vw - 16px)); color: var(--text);
   overflow-y: auto; padding: 14px; border-radius: 16px; border: 1px solid var(--line-2);
-  background: color-mix(in srgb, var(--bg-2), #0b0b12 45%); box-shadow: 0 24px 60px #000b; animation: dialog-enter .16s var(--ease) both;
+  background: color-mix(in srgb, var(--bg-2), #0b0b12 45%); box-shadow: 0 24px 60px #000b;
 }
 [data-theme="light"] .ai-popover { background: #fff; }
 .ai-pop-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
@@ -611,6 +601,7 @@ body.animated-bg .yt-channel-desc .more { background: transparent; }
 .ai-toggle .ai-logo { width: 30px; height: 30px; }
 .ai-toggle input { position: absolute; opacity: 0; pointer-events: none; }
 .ai-toggle:has(input:checked) { border-color: var(--accent-border); }
+.ai-toggle:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ai-toggle.blocked { opacity: .45; }
 .ai-toggle.blocked .ai-logo { filter: grayscale(1); }
 .ai-toggle:hover { border-color: var(--accent); }
@@ -649,7 +640,7 @@ body.animated-bg .yt-channel-desc .more { background: transparent; }
 .theme-tile { cursor: pointer; }
 .theme-tile .tile-caption { display: flex; flex-direction: column; min-width: 0; }
 .theme-tile .tile-caption strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tile-status { position: absolute; left: 12px; top: 12px; font-style: normal; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 6px; background: #000a; color: #fff; }
+.tile-status { position: absolute; left: 12px; top: 12px; max-width: calc(100% - 24px); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-style: normal; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 6px; background: #000a; color: #fff; }
 .tile-status:empty { display: none; }
 .tile-tools { display: flex; gap: 4px; }
 .tile-tools button, .tile-actions button {
@@ -667,8 +658,8 @@ body.animated-bg .yt-channel-desc .more { background: transparent; }
 .tile-actions button { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; background: #000b; color: #fff; border-color: #fff3; }
 .tile-actions button[data-act="delete"]:hover { background: #c0283f; border-color: #c0283f; }
 .add-tile { align-items: center; justify-content: center; border-style: dashed; min-height: 124px; text-align: center; }
-.add-tile .plus { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font: 300 30px/1 var(--display-font); transition: transform .2s var(--ease); }
-.add-tile:hover .plus { transform: rotate(90deg) scale(1.08); }
+.add-tile .plus { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); }
+.add-tile:hover .plus { background: var(--accent); color: var(--on-accent); }
 .add-tile .tile-caption { align-items: center; }
 
 /* saját téma szerkesztője */
@@ -710,7 +701,6 @@ input.swatch.custom-color::-webkit-color-swatch { border: 0; border-radius: 50%;
 .we-thumb { position: relative; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden; background: var(--panel-2); border: 1px solid var(--line); transition: transform .18s var(--ease), border-color .15s; }
 .we-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .we-thumb i { position: absolute; left: 6px; top: 6px; font-style: normal; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 5px; background: #000b; color: #fff; }
-.we-card.limited .we-thumb i { background: #8a5a00d0; }
 .we-card:hover:not(:disabled) .we-thumb { transform: translateY(-2px); border-color: var(--accent); }
 .we-card strong { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .we-card.busy { opacity: .6; pointer-events: none; }
@@ -721,21 +711,20 @@ input.swatch.custom-color::-webkit-color-swatch { border: 0; border-radius: 50%;
 /* ===== A felület anyaga az animált témákban =====
    nedves üveg (eső), csillagos üveg (fekete lyuk), kausztikus fény (mélytenger);
    a kurzor közelében az anyag felcsillan, és fény követi a kurzort az üvegen */
-body:is(.scene-rain, .scene-blackhole) :is(.hero, .ed-side, .source-card, .settings-dialog) { position: relative; isolation: isolate; }
+body:is(.scene-rain, .scene-blackhole) :is(.hero, .ed-side, .source-card) { position: relative; isolation: isolate; }
 body:is(.scene-rain, .scene-blackhole) :is(.hero, .ed-side, .source-card, .settings-dialog)::after {
   content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; border-radius: inherit;
   background-image: var(--material); background-size: 320px 320px;
 }
-body.scene-rain :is(.hero, .ed-side, .source-card, .settings-dialog)::after { opacity: .55; mix-blend-mode: screen; }
+body.scene-rain :is(.hero, .ed-side, .source-card, .settings-dialog)::after { opacity: .65; }
 body.scene-blackhole :is(.hero, .ed-side, .source-card, .settings-dialog)::after { opacity: .75; mix-blend-mode: screen; animation: twinkle 4s ease-in-out infinite; }
 @keyframes twinkle { 50% { opacity: .4; } }
-@keyframes caustic-drift { to { background-position: 320px 160px; } }
 body:is(.scene-rain, .scene-blackhole) :is(.hero, .ed-side) > * { position: relative; z-index: 1; }
 body:is(.scene-rain, .scene-blackhole) .hero::before {
   background: radial-gradient(340px circle at var(--mx, -999px) var(--my, -999px), rgba(var(--glow), calc(.12 + .14 * var(--scene-pulse))), transparent 70%) fixed;
   opacity: 1;
 }
-body:is(.scene-rain, .scene-blackhole) .topbar { background-image: var(--material); background-size: 320px; background-blend-mode: screen; }
+body:is(.scene-rain, .scene-blackhole) .topbar { background-image: var(--material); background-size: 320px; }
 @media (prefers-reduced-motion: reduce) {
   body.scene-blackhole :is(.hero, .ed-side, .source-card, .settings-dialog)::after { animation: none; }
 }

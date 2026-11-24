@@ -1,5 +1,4 @@
 // background.js — élő témahátterek (WebGL) és egyéni kép/videó háttér.
-// Procedurális jelenetek: végtelenül, varrat nélkül ismétlődnek, bármilyen felbontáson élesek.
 // A jelenet eseményei (villám, pulzálás, fényhullám) CSS-változókon át a felületet is mozgatják.
 (() => {
   const layer = document.getElementById("bgLayer");
@@ -22,292 +21,7 @@ float fbm(vec2 p){ float v = 0., a = .5; mat2 r = mat2(.8, .6, -.6, .8); for (in
 vec3 aces(vec3 x){ return clamp((x * (2.51 * x + .03)) / (x * (2.43 * x + .59) + .14), 0., 1.); }
 `;
 
-  // --- Fekete lyuk: Schwarzschild-fénygörbülés, akkréciós korong Doppler-fénnyel ---
-  const BLACKHOLE = COMMON + `
-vec3 stars(vec3 d){
-  vec3 col = vec3(0.);
-  vec2 sp = vec2(atan(d.z, d.x), asin(clamp(d.y, -1., 1.)));
-  for (int l = 0; l < 3; l++){
-    float s = 90. + float(l) * 130.;
-    vec2 g = sp * s / 3.14159; vec2 id = floor(g); vec2 f = fract(g) - .5;
-    vec2 o = hash22(id + float(l) * 17.) - .5;
-    float h = hash12(id * 1.7 + float(l));
-    float star = smoothstep(.06, 0., length(f - o * .7)) * step(.86, h);
-    float tw = .7 + .3 * sin(uTime * (1. + h * 3.) + h * 40.);
-    col += star * tw * mix(vec3(.75, .82, 1.), vec3(1., .85, .7), hash12(id + 3.)) * (1.2 - float(l) * .3);
-  }
-  float neb = fbm(sp * 2.2 + 3.);
-  col += vec3(.25, .12, .35) * neb * neb * neb * .9 + vec3(.05, .09, .22) * pow(max(fbm(sp * 3.1 - 7.), 0.), 2.) * .8;
-  return col;
-}
-vec3 disk(vec3 q, vec3 rd, float r){
-  float inner = 3.0, outer = 11.0;
-  if (r < inner || r > outer) return vec3(0.);
-  // két, fél periódussal eltolt fázis keverése: a differenciális forgás nem nyúlik szét végtelenre
-  float P = 24.;
-  float t1 = mod(uTime, P), t2 = mod(uTime + P * .5, P);
-  float w = abs(mod(uTime, P) / P * 2. - 1.);
-  float spin = 5.5 / pow(r, 1.5);
-  vec2 xz = q.xz;
-  float a1 = t1 * spin, a2 = t2 * spin;
-  vec2 u1 = mat2(cos(a1), -sin(a1), sin(a1), cos(a1)) * xz;
-  vec2 u2 = mat2(cos(a2), -sin(a2), sin(a2), cos(a2)) * xz;
-  float ang1 = atan(u1.y, u1.x), ang2 = atan(u2.y, u2.x);
-  float n1 = fbm(vec2(r * 1.9, ang1 * 2.0) + 4.) * .6 + fbm(u1 * .9) * .4;
-  float n2 = fbm(vec2(r * 1.9, ang2 * 2.0) + 4.) * .6 + fbm(u2 * .9) * .4;
-  float n = mix(n1, n2, w);
-  float band = .78 + .22 * sin(r * 5.1 + n * 7.);
-  float streak = mix(noise(vec2(r * 9., ang1 * 1.5) + 11.), noise(vec2(r * 9., ang2 * 1.5) + 11.), w);
-  float dens = smoothstep(inner, inner + .5, r) * smoothstep(outer, outer - 5.5, r) * (.25 + 1.05 * n * band) * (.75 + .5 * streak);
-  float temp = smoothstep(outer, inner, r);
-  vec3 c = mix(vec3(.9, .22, .04), vec3(1., .62, .26), temp);
-  c = mix(c, vec3(1., .93, .82), temp * temp * temp);
-  vec3 vel = normalize(vec3(-q.z, 0., q.x));
-  float dop = 1. + .55 * dot(vel, -rd);
-  return c * dens * dop * dop * dop * (1.1 + 1.8 * temp);
-}
-void main(){
-  vec2 uv = (gl_FragCoord.xy - .5 * uRes) / uRes.y;
-  float yaw = .25 * sin(uTime * .05) + uMouse.x * .18;
-  float pitch = .12 + uMouse.y * .06;
-  vec3 ro = vec3(sin(yaw) * 30., 30. * sin(pitch), -cos(yaw) * 30.);
-  vec3 fw = normalize(-ro), rt = normalize(cross(vec3(0, 1, 0), fw)), up = cross(fw, rt);
-  vec3 rd = normalize(fw * 2.0 + (uv.x - .08) * rt + (uv.y + .02) * up);
-  vec3 p = ro, v = rd;
-  vec3 h = cross(p, v); float h2 = dot(h, h);
-  vec3 col = vec3(0.); float trans = 1.; float minR = 1e3; bool captured = false;
-  int steps = uQuality > .5 ? 150 : 80;
-  for (int i = 0; i < 150; i++){
-    if (i >= steps) break;
-    float r2 = dot(p, p); float r = sqrt(r2);
-    minR = min(minR, r);
-    if (r < 1.) { captured = true; break; }
-    float dt = clamp(.075 * r, .045, 1.6);
-    vec3 acc = -1.5 * h2 * p / (r2 * r2 * r);
-    vec3 pn = p + v * dt; v += acc * dt;
-    if (p.y * pn.y < 0.) {
-      vec3 q = mix(p, pn, p.y / (p.y - pn.y));
-      float rq = length(q.xz);
-      vec3 e = disk(q, normalize(v), rq);
-      float a = clamp(dot(e, vec3(.3)) * .9, 0., .97);
-      col += trans * e; trans *= 1. - a;
-    }
-    p = pn;
-    if (r > 80. && dot(p, v) > 0.) break;
-  }
-  if (!captured) col += trans * stars(normalize(v));
-  if (!captured) col += vec3(1., .55, .2) * exp(-max(minR - 1.5, 0.) * 2.4) * .22 * trans;      // fotongyűrű-ragyogás
-  col *= 1. + uFlash * .35;
-  col = aces(col * 1.05);
-  col *= 1. - .35 * dot(uv, uv);
-  gl_FragColor = vec4(pow(max(col, 0.), vec3(.95)), 1.);
-}`;
-
-  // --- Minecraft-szerű pixeles táj: kockás hegyek, fenyők, felhők, szögletes nap, hulló levelek ---
-  // (Alacsony felbontáson renderelve és pixelesen felnagyítva: valódi pixel-art hatás.)
-  const MINECRAFT = COMMON + `
-uniform vec3 uRip[8];
-float q(float v, float s){ return floor(v * s) / s; }
-float ridge(float x, float seed, float scale, float amp){
-  float h = 0.;
-  h += noise(vec2(x * scale + seed, seed)) * amp;
-  h += noise(vec2(x * scale * 2.3 + seed * 3., seed)) * amp * .45;
-  h += noise(vec2(x * scale * 5.1 + seed * 7., seed)) * amp * .18;
-  return h;
-}
-void main(){
-  vec2 res = uRes;
-  vec2 px = floor(gl_FragCoord.xy);
-  vec2 uv = px / res;
-  float aspect = res.x / res.y;
-  vec2 m = uMouse * .5 + .5;
-  float t = uTime;
-  float blocks = res.y / 6.;                       // egy "kocka" mérete pixelben
-  // ég
-  vec3 sky = mix(vec3(.47, .66, 1.), vec3(.75, .86, 1.), pow(1. - uv.y, 1.6));
-  vec3 col = sky;
-  // szögletes nap
-  vec2 sunPos = vec2(.78 + (m.x - .5) * .01, .78);
-  vec2 sd = abs((uv - sunPos) * vec2(aspect, 1.));
-  float sun = step(max(sd.x, sd.y), .055);
-  col = mix(col, vec3(1., .98, .82), sun);
-  col += vec3(1., .9, .6) * .25 * smoothstep(.35, .0, length((uv - sunPos) * vec2(aspect, 1.)));
-  // kockás felhők
-  for (int l = 0; l < 2; l++){
-    float fl = float(l);
-    vec2 cp = vec2(uv.x * aspect * (5. + fl * 3.) + t * (.03 + fl * .02) - (m.x - .5) * (.3 + fl * .4), uv.y * (14. + fl * 6.));
-    vec2 cell = floor(cp * vec2(2., 1.));
-    float c = step(.62, noise(cell * .35 + fl * 9.)) * step(.66 - fl * .08, uv.y);
-    col = mix(col, vec3(1.) - fl * .04, c * (.92 - fl * .2));
-  }
-  // hegyláncok (távol: kékes, havas csúccsal)
-  float x = uv.x * aspect;
-  for (int l = 0; l < 3; l++){
-    float fl = float(l);
-    float par = (m.x - .5) * (.03 + fl * .05);
-    float base = .42 - fl * .09;
-    float h = base + q(ridge(x + par + fl * 3.1, 11. + fl * 5., 1.3 - fl * .3, .32 - fl * .07), blocks / (1.5 + fl));
-    if (uv.y < h){
-      vec3 rock = mix(vec3(.55, .62, .74), vec3(.38, .44, .40), fl / 2.);
-      vec3 grass = mix(vec3(.45, .62, .55), vec3(.29, .52, .22), fl / 2.);
-      float topBand = smoothstep(.0, 1. / blocks * 2., h - uv.y);
-      vec3 c = mix(grass, rock, smoothstep(base + .08, base + .2, uv.y));
-      if (l == 0) c = mix(c, vec3(.93, .95, 1.), step(.62, uv.y));     // hó a csúcsokon
-      c *= .92 + .08 * hash12(floor(vec2(x, uv.y) * blocks * (1. + fl)));  // kocka-textúra
-      col = mix(c * (1. - topBand * .06), col, .0);
-      col = mix(mix(col, sky, .35 - fl * .14), col, 1.);
-      col = mix(col, sky, (.32 - fl * .15));
-    }
-  }
-  // fenyők a közeli dombon
-  float hillY = .2 + q(ridge(x + (m.x - .5) * .1, 3., 2., .08), blocks);
-  for (int i = 0; i < 14; i++){
-    float fi = float(i);
-    float tx = (fi + .5 + (hash12(vec2(fi, 4.)) - .5) * .8) / 14. * aspect + (m.x - .5) * .1;
-    float th = .16 + hash12(vec2(fi, 9.)) * .14;
-    float ty = .2 + q(ridge(tx, 3., 2., .08), blocks);
-    vec2 d = vec2(x - tx, uv.y - ty);
-    float w = q(max(0., (1. - d.y / th)) * .045 + .006, blocks);
-    float leaves = step(abs(d.x), w) * step(.02, d.y) * step(d.y, th);
-    float trunk = step(abs(d.x), .008) * step(0., d.y) * step(d.y, .04);
-    vec3 green = vec3(.13, .33, .16) * (.85 + .3 * hash12(floor(vec2(x, uv.y) * blocks * 2.)));
-    col = mix(col, green, leaves);
-    col = mix(col, vec3(.36, .24, .13), trunk);
-  }
-  // fű és föld előtér
-  if (uv.y < hillY){
-    vec3 dirt = vec3(.47, .33, .22) * (.85 + .3 * hash12(floor(vec2(x, uv.y) * blocks * 2.)));
-    vec3 grassTop = vec3(.36, .66, .23) * (.85 + .3 * hash12(floor(vec2(x, uv.y) * blocks * 2.) + 3.));
-    col = uv.y > hillY - 2. / blocks ? grassTop : dirt;
-  }
-  // hulló levelek (kis négyzetek), a kurzor elfújja őket
-  for (int l = 0; l < 2; l++){
-    float fl = float(l);
-    vec2 g = vec2(uv.x * aspect * (6. + fl * 4.), uv.y * (4. + fl * 2.) + t * (.35 + fl * .2));
-    vec2 id = floor(g); vec2 f = fract(g);
-    float h = hash12(id + fl * 7.);
-    if (h > .7){
-      vec2 p = vec2(.5 + sin(t * 1.3 + h * 20.) * .3, fract(h * 13.));
-      vec2 lp = vec2((id.x + p.x) / ((6. + fl * 4.)) / aspect, (id.y + p.y - t * (.35 + fl * .2)) / (4. + fl * 2.));
-      vec2 away = (lp - m) * vec2(aspect, 1.);
-      float push = smoothstep(.18, 0., length(away));
-      vec2 dd = abs(f - p) * vec2(6. + fl * 4., 4. + fl * 2.) / vec2(aspect * .5, 1.) - push * 2.;
-      float sz = .012 + fl * .004;
-      float leaf = step(max(abs(f.x - p.x) * aspect, abs(f.y - p.y)) * 0., 1.) * step(max(abs((f.x - p.x) / (6. + fl * 4.) * aspect), abs((f.y - p.y) / (4. + fl * 2.))), sz);
-      col = mix(col, mix(vec3(.25, .5, .18), vec3(.8, .55, .2), step(.88, h)), leaf * .9);
-    }
-  }
-  // kattintásra kocka-törmelék repül szét
-  for (int i = 0; i < 8; i++){
-    vec3 r = uRip[i]; float age = t - r.z;
-    if (age < 0. || age > 1.2) continue;
-    for (int k = 0; k < 6; k++){
-      float fk = float(k);
-      vec2 v = vec2(cos(fk * 1.05 + r.z), .7 + .6 * sin(fk * 2.3 + r.z)) * .32;
-      vec2 p = r.xy + vec2(v.x / aspect, v.y) * age - vec2(0., 1.1 * age * age);
-      vec2 d = abs((uv - p) * vec2(aspect, 1.));
-      float s = .007 * (1. - age / 1.2);
-      col = mix(col, vec3(.45, .32, .2) * (.8 + .4 * hash12(vec2(fk, r.z))), step(max(d.x, d.y), s));
-    }
-  }
-  gl_FragColor = vec4(col, 1.);
-}`;
-
-  // --- Eső az ablakon: elmosódott éjszakai város, csúszó cseppek fénytöréssel, villámlás ---
-  const RAIN = COMMON + `
-vec3 city(vec2 uv, float blur){
-  vec3 col = mix(vec3(.015, .02, .05), vec3(.065, .055, .13), smoothstep(-.2, .9, uv.y));
-  col += vec3(.25, .3, .55) * uFlash * smoothstep(.1, 1., uv.y);
-  // felhők a villám fényében
-  col += vec3(.35, .38, .6) * uFlash * fbm(uv * 3. + uTime * .02) * smoothstep(.3, 1., uv.y);
-  vec2 aspect = vec2(uRes.x / uRes.y, 1.);
-  for (int l = 0; l < 3; l++){
-    float fl = float(l); float sc = 4.5 + fl * 3.5;
-    vec2 g = (uv * aspect + vec2(uTime * .004 * (fl + 1.), 0.)) * sc;
-    vec2 base = floor(g);
-    for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++){
-      vec2 id = base + vec2(float(x), float(y));
-      float h = hash12(id * 1.3 + fl);
-      if (h < .5) continue;
-      vec2 c = id + .5 + (hash22(id + fl * 7.) - .5) * .8;
-      float height = c.y / sc;
-      float lit = smoothstep(.8, .15, height + fl * .06);
-      if (lit <= 0.) continue;
-      vec3 hue = mix(vec3(1., .55, .25), vec3(.4, .6, 1.), hash12(id + 2.));
-      hue = mix(hue, vec3(1., .3, .62), step(.86, hash12(id + 5.)));
-      float rad = (.22 + .3 * hash12(id + 9.)) * (1. + blur * .7);
-      float d = length(g - c);
-      float flick = .78 + .22 * sin(uTime * (.8 + h * 2.) + h * 50.);
-      float ring = smoothstep(rad, rad * .9, d) * .25;
-      col += hue * (smoothstep(rad, rad * (.25 - blur * .2), d) + ring) * lit * flick * (.2 - fl * .045);
-    }
-  }
-  // utcai fényfolt alul
-  col += vec3(.8, .45, .2) * .12 * smoothstep(.35, 0., uv.y) * (.6 + .4 * noise(vec2(uv.x * 4., uTime * .2)));
-  return col; }
-vec2 drops(vec2 uv, float t, out float trail){
-  vec2 n = vec2(0.); trail = 0.;
-  // nagy, lefelé csúszó cseppek
-  vec2 a = vec2(6., 1.);
-  vec2 g = uv * a * 2.2; g.y += t * .22;
-  vec2 id = floor(g); vec2 st = fract(g) - .5;
-  float h = hash12(id + 31.);
-  float wob = sin(t * 3. + h * 20.) * .08;
-  float y = -fract(t * .22 * (.6 + h * .5) + h) + .5;
-  vec2 dp = vec2(st.x - (hash12(id) - .5) * .6 - wob * .5, (st.y - y) / a.x * a.y * 2.);
-  float d = length(dp * vec2(1., 1.6));
-  float drop = smoothstep(.07, .0, d);
-  float tr = smoothstep(.05, .0, abs(dp.x)) * smoothstep(-.02, .2, st.y - y) * smoothstep(.5, .1, st.y - y);
-  n += dp * drop * 12.;
-  trail += tr;
-  // apró, álló cseppek
-  for (int l = 0; l < 2; l++){
-    float fl = float(l);
-    vec2 g2 = uv * (24. + fl * 18.);
-    vec2 id2 = floor(g2); vec2 f2 = fract(g2) - .5;
-    float h2 = hash12(id2 + fl * 5.);
-    vec2 o = (hash22(id2) - .5) * .7;
-    float life = fract(t * .05 + h2);
-    float rad = .14 * smoothstep(1., .8, life) * step(.55, h2);
-    vec2 q = f2 - o;
-    float m = smoothstep(rad, rad * .4, length(q));
-    n += q * m * 4.;
-  }
-  return n; }
-float rainLines(vec2 uv, float t){
-  float r = 0.;
-  for (int l = 0; l < 3; l++){
-    float fl = float(l);
-    vec2 q = uv * vec2(70. + fl * 40., 2.5 + fl);
-    q.x += q.y * .18;
-    q.y += t * (6. + fl * 2.);
-    vec2 id = floor(q); vec2 f = fract(q);
-    float h = hash12(vec2(id.x, id.y + fl * 3.));
-    r += step(.93, h) * smoothstep(.08, 0., abs(f.x - .5)) * smoothstep(0., .4, f.y) * smoothstep(1., .5, f.y) * (.25 - fl * .05);
-  }
-  return r; }
-void main(){
-  vec2 uv = gl_FragCoord.xy / uRes; vec2 p = (gl_FragCoord.xy - .5 * uRes) / uRes.y;
-  float t = uTime;
-  float trail;
-  vec2 n = drops(p * .9 + uMouse * .01, t, trail);
-  vec3 col = city(uv + n * .02 + uMouse * .01, .55);
-  float lens = clamp(length(n) * 2. + trail * .6, 0., 1.);
-  if (lens > .02) {
-    // a csepp lencseként fordítva, élesebben mutatja a mögötte lévő fényeket
-    vec3 sharp = city(uv - n * .06, .05) * 1.25;
-    col = mix(col, sharp, lens);
-    col += vec3(.9, .92, 1.) * pow(clamp(dot(normalize(n + 1e-4), vec2(-.6, .8)), 0., 1.), 8.) * lens * .35;
-    col *= 1. - .25 * smoothstep(.6, 1., lens) * (1. - lens);
-  }
-  col += vec3(.6, .65, .9) * rainLines(p, t) * (.35 + uFlash * 1.5);
-  col += uFlash * vec3(.55, .6, .9) * .25;
-  col *= 1. - .35 * dot(p, p);
-  col = aces(col * 1.5);
-  gl_FragColor = vec4(col, 1.);
-}`;
-
-  const SCENES = { blackhole: BLACKHOLE, minecraft: MINECRAFT, rain: RAIN };
+  const SCENES = ["blackhole", "minecraft", "rain"];
   const SCENE_INDEX = { blackhole: 0, minecraft: 1, rain: 2 };
 
   // --- Valódi videó + kurzorra reagáló effektek (a videó WebGL-textúra) ---
@@ -467,11 +181,17 @@ void main(){
         col += vec3(1., .95, .8) * smoothstep(.09 * max(e2.w, .5), 0., length(f - o)) * tw * a * .8;
       }
     } else if (type < 3.5) {                                           // fénysugarak
-      vec2 rel = (uv - e.xy) * asp;
-      float ang = atan(rel.y, rel.x);
-      float rays = pow(max(0., .5 + .5 * sin(ang * 26. + noise(vec2(ang * 4., t * .2)) * 3.)), 6.);
-      float fall = smoothstep(1.2, .0, length(rel)) * step(rel.y, 0.05);
-      col += vec3(1., .94, .78) * rays * fall * .22 * a * (.8 + .2 * sin(t * .5));
+      // The preset emits a slowly rotating, warm sprite only a few times per minute.
+      vec2 rel = (tc - e.xy) * vec2(uImgAspect, 1.);
+      float period = 1. / max(e2.w, .025);
+      float age = mod(t + period * .28, period);
+      float envelope = smoothstep(0., 1.6, age) * (1. - smoothstep(7., 15., age));
+      float ang = atan(rel.y, rel.x) + 2.19 + .07 * sin(t * .19);
+      float rays = .4 * exp(-pow((ang + .26) * 16., 2.))
+                 + .8 * exp(-pow(ang * 12., 2.))
+                 + .45 * exp(-pow((ang - .23) * 18., 2.));
+      float fall = 1. - smoothstep(.08, .75, length(rel));
+      col += vec3(.69, .55, .3) * rays * fall * envelope * .095 * a;
     } else if (type < 4.5) {                                           // hulló levelek
       for (int l = 0; l < 2; l++){
         float fl = float(l);
@@ -479,13 +199,14 @@ void main(){
         vec2 g = vec2(uv.x * asp.x * sc + sin(t * .5 + uv.y * 3.) * .4, uv.y * sc * .6 + t * .35 * spd * (1. + fl * .4));
         vec2 id = floor(g); vec2 f = fract(g) - .5;
         float h = hash12(id + fl * 13. + float(i));
-        if (h > .82) {
+        if (h > .91) {
           vec2 o = (hash22(id) - .5) * .5;
           vec2 world = vec2((id.x + .5 + o.x) / sc / asp.x, 0.);
           float push = smoothstep(.15, 0., length((vec2(world.x, uv.y) - uMouse) * asp)) * uFx;
           float ang = t * (1. + h) + h * 10.;
           vec2 q = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * (f - o - vec2(push * .6, 0.));
-          float leaf = smoothstep(.1, .07, length(q * vec2(1., 2.2)) );
+          float size = clamp(e2.w, .35, 1.);
+          float leaf = 1. - smoothstep(.05, .13, length(q * vec2(1., 2.2)) / size);
           vec3 lc = mix(vec3(.35, .55, .2), vec3(.85, .55, .2), step(.93, h));
           col = mix(col, lc, leaf * .85 * a);
         }
@@ -505,7 +226,9 @@ void main(){
     } else if (type < 6.5) {                                           // csillogó nyomvonal
       vec2 g = uv * asp * 60.;
       vec2 id = floor(g); float h = hash12(id + 91.);
-      col += vec3(1.) * step(.995, h) * (.5 + .5 * sin(t * 3. + h * 50.)) * a * .5;
+      vec2 center = .24 + hash22(id + 13.) * .52;
+      float star = 1. - smoothstep(.026, .12, length(fract(g) - center));
+      col += vec3(1.) * star * step(.995, h) * (.5 + .5 * sin(t * 3. + h * 50.)) * a * .5;
     } else if (type < 7.5) {                                           // eső
       vec2 g = vec2(uv.x * asp.x * 90., uv.y * 3. + t * 5. * spd);
       vec2 id = floor(g); vec2 f = fract(g);
@@ -537,9 +260,10 @@ void main(){
 
   let gl = null, sceneName = "", running = false, raf = 0;
   let quality = "high", lastFrame = 0, startTime = performance.now();
-  let fxEnabled = true, mode = "";              // "procedural" | "video" | ""
+  const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+  let fxEnabled = true, mode = "";
   const mouse = { x: .5, y: .5, tx: .5, ty: .5, moved: 0 };
-  let flash = 0, nextFlash = 0, flashQueue = [];
+  let flash = 0;
   const programs = {};
   let current = null;                            // {prog, uniforms}
   let videoTex = null, fogTex = null;
@@ -606,9 +330,7 @@ void main(){
   }
 
   function scale() {
-    if (mode === "procedural" && sceneName === "minecraft") return .2;   // pixel-art: nagy, éles pixelek
-    const base = mode === "video" || mode === "scene" ? .8 : ({ blackhole: .62, minecraft: .5, rain: .75 }[sceneName] || .7);
-    return quality === "low" ? base * .6 : base;
+    return quality === "low" ? .48 : .8;
   }
 
   function resize() {
@@ -623,20 +345,8 @@ void main(){
 
   // A jelenet eseményei: a shader és a felület ugyanazt az ütemet látja.
   let lumPulse = 0.5;
-  function updateEvents(t, dt) {
-    if (sceneName === "rain" && mode === "procedural") {
-      if (t > nextFlash) {
-        const strikes = 1 + Math.floor(Math.random() * 3);
-        for (let i = 0; i < strikes; i++) flashQueue.push(t + i * (0.09 + Math.random() * 0.12));
-        nextFlash = t + 7 + Math.random() * 11;
-      }
-      if (flashQueue.length && t >= flashQueue[0]) { flashQueue.shift(); flash = 0.75 + Math.random() * 0.25; }
-      flash = Math.max(0, flash - dt * 2.6);
-      root.style.setProperty("--scene-flash", flash.toFixed(3));
-    } else {
-      flash = mode === "video" ? lumPulse : 0.5 + 0.5 * Math.sin(t * 0.42) * Math.sin(t * 0.13 + 1.3);
-      root.style.setProperty("--scene-flash", "0");
-    }
+  function updateEvents(t) {
+    flash = mode === "video" ? lumPulse : 0.5 + 0.5 * Math.sin(t * 0.42) * Math.sin(t * 0.13 + 1.3);
     root.style.setProperty("--scene-pulse", flash.toFixed(3));
   }
 
@@ -656,7 +366,7 @@ void main(){
   }
 
   function draw(now) {
-    if (!current) return 0;
+    if (!current || !mode) return 0;
     const t = (now - startTime) / 1000;
     mouse.x += (mouse.tx - mouse.x) * (mode === "video" ? 0.2 : 0.04);
     mouse.y += (mouse.ty - mouse.y) * (mode === "video" ? 0.2 : 0.04);
@@ -705,9 +415,6 @@ void main(){
       gl.uniform4fv(u.uEmit2, sceneEmit2);
       gl.uniform1i(u.uEmitCount, sceneEmitCount);
       gl.uniform3fv(u.uRip, ripples.flat());
-    } else {
-      gl.uniform2f(u.uMouse, (mouse.x - .5) * 2, (mouse.y - .5) * 2);
-      if (u.uRip) gl.uniform3fv(u.uRip, ripples.flat());
     }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     return t;
@@ -720,10 +427,9 @@ void main(){
     const focused = document.hasFocus();
     const fps = quality === "low" ? 30 : focused ? 60 : 24;
     if (now - lastFrame < 1000 / fps - 2) return;
-    const dt = Math.min(0.1, (now - lastFrame) / 1000);
     lastFrame = now;
     const t = (now - startTime) / 1000;
-    if (now - lastEvent > 50) { updateEvents(t, Math.max(dt, (now - lastEvent) / 1000)); lastEvent = now; }
+    if (now - lastEvent > 50) { updateEvents(t); lastEvent = now; }
     draw(now);
   }
 
@@ -756,7 +462,7 @@ void main(){
       ripples[rippleIndex] = [mouse.tx, mouse.ty, (now - startTime) / 1000];
       rippleIndex = (rippleIndex + 1) % ripples.length;
     }
-    if (webFrame && !web.hidden && now - lastWebMove > 33) {
+    if (fxEnabled && !web.hidden && now - lastWebMove > 33) {
       lastWebMove = now;
       web.contentWindow?.postMessage({ type: "dl-mouse", x: e.clientX / innerWidth, y: e.clientY / innerHeight }, "*");
     }
@@ -846,36 +552,44 @@ void main(){
     c.width = c.height = 320;
     const x = c.getContext("2d");
     if (kind === "wet") {
-      for (let i = 0; i < 110; i++) {
-        const px = Math.random() * 320, py = Math.random() * 320, r = 1 + Math.random() ** 3 * 7;
-        const g = x.createRadialGradient(px - r * .35, py - r * .4, 0, px, py, r);
-        g.addColorStop(0, "rgba(255,255,255,0.85)"); g.addColorStop(.35, "rgba(255,255,255,0.18)");
-        g.addColorStop(.8, "rgba(255,255,255,0.06)"); g.addColorStop(1, "rgba(255,255,255,0)");
-        x.fillStyle = g; x.beginPath(); x.ellipse(px, py, r, r * 1.12, 0, 0, Math.PI * 2); x.fill();
-        if (r > 5 && Math.random() < .5) {   // lefolyó csík a nagyobb cseppek mögött
-          const t = x.createLinearGradient(px, py - r * 7, px, py);
-          t.addColorStop(0, "rgba(255,255,255,0)"); t.addColorStop(1, "rgba(255,255,255,0.12)");
-          x.fillStyle = t; x.fillRect(px - r * .25, py - r * 7, r * .5, r * 7);
+      for (let i = 0; i < 56; i++) {
+        const px = Math.random() * 320, py = Math.random() * 320;
+        const radius = .65 + Math.random() ** 3 * 3.1;
+        x.save();
+        x.translate(px, py);
+        x.rotate((Math.random() - .5) * .8);
+        x.scale(.85 + Math.random() * .25, 1 + Math.random() * .4);
+        x.beginPath();
+        x.moveTo(-radius * .06, -radius);
+        x.bezierCurveTo(radius * .52, -radius * 1.03, radius * 1.04, -radius * .45, radius * .98, radius * .23);
+        x.bezierCurveTo(radius * .91, radius * 1.2, -radius * .95, radius * 1.18, -radius, radius * .2);
+        x.bezierCurveTo(-radius * 1.05, -radius * .44, -radius * .56, -radius * .88, -radius * .06, -radius);
+        x.closePath();
+        const body = x.createLinearGradient(0, -radius, 0, radius);
+        body.addColorStop(0, "#0009");
+        body.addColorStop(.54, "#1f334833");
+        body.addColorStop(1, "#b3ceeb80");
+        x.fillStyle = body;
+        x.shadowColor = "#0008";
+        x.shadowBlur = radius * .46;
+        x.shadowOffsetY = radius * .4;
+        x.fill();
+        if (radius > 1.25) {
+          x.shadowColor = "transparent";
+          x.lineWidth = Math.max(.35, radius * .13);
+          x.strokeStyle = "#e5f3ff78";
+          x.beginPath();
+          x.ellipse(0, 0, radius * .72, radius * .77, 0, 3.65, 4.65);
+          x.stroke();
         }
+        x.restore();
       }
-    } else if (kind === "stars") {
+    } else {
       for (let i = 0; i < 160; i++) {
         const px = Math.random() * 320, py = Math.random() * 320, r = Math.random() < .08 ? 1.6 : .7;
         x.fillStyle = `rgba(255,${235 + Math.random() * 20 | 0},${210 + Math.random() * 45 | 0},${.35 + Math.random() * .6})`;
         x.beginPath(); x.arc(px, py, r, 0, Math.PI * 2); x.fill();
         if (r > 1) { x.fillRect(px - 4, py - .3, 8, .6); x.fillRect(px - .3, py - 4, .6, 8); }
-      }
-    } else {
-      // kausztikus fényháló: egymást metsző, elmosott görbék
-      x.strokeStyle = "rgba(190,250,255,0.5)";
-      x.filter = "blur(1.4px)";
-      for (let i = 0; i < 26; i++) {
-        x.lineWidth = .8 + Math.random() * 2;
-        x.beginPath();
-        let px = Math.random() * 320, py = Math.random() * 320;
-        x.moveTo(px, py);
-        for (let k = 0; k < 4; k++) { px += (Math.random() - .5) * 160; py += (Math.random() - .5) * 160; x.quadraticCurveTo(px + 40, py - 40, px, py); }
-        x.stroke();
       }
     }
     return new Promise(resolve => c.toBlob(blob => { textures[kind] = URL.createObjectURL(blob); resolve(textures[kind]); }));
@@ -911,12 +625,13 @@ void main(){
     }
     const kind = { rain: "wet", blackhole: "stars" }[scene] || "stars";
     const url = await makeTexture(kind);
+    if (!document.body.classList.contains("scene-" + scene)) return;
     root.style.setProperty("--material", `url("${url}")`);
   }
 
   // --- egyéni háttér: kép, (átúsztatva ismétlődő) videó vagy Wallpaper Engine web-háttér ---
   const web = document.getElementById("bgWeb");
-  let webFrame = false, lastWebMove = 0;
+  let lastWebMove = 0;
   let customKey = "", crossfadeHandler = null, customVideoActive = null;
 
   function clearCustom() {
@@ -926,10 +641,28 @@ void main(){
       if (crossfadeHandler) v.removeEventListener("timeupdate", crossfadeHandler);
     }
     image.hidden = true; image.removeAttribute("src");
-    web.hidden = true; web.removeAttribute("src"); webFrame = false;
+    hideWeb();
     for (const prop of ["--accent", "--accent-2", "--glow"]) root.style.removeProperty(prop);
     setSurface("");
     customKey = ""; customVideoActive = null;
+  }
+
+  function hideWeb() {
+    web.onload = null;
+    web.hidden = true;
+    web.removeAttribute("src");
+  }
+
+  function showWeb(src, muted, volume = 1) {
+    web.hidden = false;
+    const updateWeb = () => {
+      web.contentWindow?.postMessage({ type: "dl-mute", muted }, "*");
+      web.contentWindow?.postMessage({ type: "dl-volume", volume }, "*");
+      web.contentWindow?.postMessage({ type: "dl-animation", quality }, "*");
+    };
+    if (web.getAttribute("src") === src) { updateWeb(); return; }
+    web.onload = updateWeb;
+    web.src = src;
   }
 
   function enableSoundOnGesture(video, volume) {
@@ -952,13 +685,7 @@ void main(){
         const request = ++sceneRequest;
         showWallpaperScene(`${base}/files/`, request, "lens");
       } else if (theme.kind === "web") {
-        web.src = `${base}/files/${encodeURIComponent(theme.file).replace(/%2F/g, "/")}`;
-        web.hidden = false;
-        webFrame = true;
-        web.onload = () => {
-          web.contentWindow?.postMessage({ type: "dl-mute", muted: !theme.sound }, "*");
-          web.contentWindow?.postMessage({ type: "dl-volume", volume }, "*");
-        };
+        showWeb(base + "/files/" + encodeURI(theme.file), !theme.sound, volume);
         if (!theme.accent && theme.hasThumb) {
           const thumb = new Image();
           thumb.onload = () => sampleColor(thumb, true);
@@ -1038,7 +765,7 @@ void main(){
       return [bx, by];
     } catch { return [.6, .6]; }
   }
-  async function loadSceneDescriptor(base) {
+  async function loadSceneDescriptor(base, request) {
     const desc = await fetch(base + "scene.json", { cache: "no-store" }).then(r => r.json());
     const layer = desc.layers[0];
     const [img, flow, phase] = await Promise.all([
@@ -1046,6 +773,7 @@ void main(){
       layer.flow?.mask ? loadImage(base + layer.flow.mask).catch(() => null) : null,
       layer.flow?.phase ? loadImage(base + layer.flow.phase).catch(() => null) : null,
     ]);
+    if (request !== sceneRequest) return null;
     if (!initGL()) throw new Error("WebGL unavailable");
     for (const key of ["img", "flow", "phase"]) if (sceneTex[key]) gl.deleteTexture(sceneTex[key]);
     sceneTex = { img: uploadImage(img), flow: flow ? uploadImage(flow) : null, phase: phase ? uploadImage(phase, true) : null,
@@ -1055,7 +783,8 @@ void main(){
     const parts = (desc.particles || []).filter(p => PARTICLE_TYPE[p.type]).slice(0, 10);
     parts.forEach((p, i) => {
       sceneEmit.set([p.x, p.y, PARTICLE_TYPE[p.type], Math.min(1, p.alpha ?? 1)], i * 4);
-      sceneEmit2.set([p.scale?.[0] ?? 1, p.scale?.[1] ?? 1, p.speed ?? 1, p.size ?? 1], i * 4);
+      const sizeOrShaftRate = p.type === "shafts" ? .2 * (p.rate ?? 1) : (p.size ?? 1);
+      sceneEmit2.set([p.scale?.[0] ?? 1, p.scale?.[1] ?? 1, p.speed ?? 1, sizeOrShaftRate], i * 4);
     });
     sceneEmitCount = parts.length;
     sceneDesc = desc;
@@ -1063,84 +792,89 @@ void main(){
   }
   async function showWallpaperScene(base, request, cursor) {
     try {
-      const img = await loadSceneDescriptor(base);
-      if (request !== sceneRequest) return;
+      const img = await loadSceneDescriptor(base, request);
+      if (!img || request !== sceneRequest) return;
       mode = "scene";
       cursorStyle = cursor;
       if (!useProgram("scene", SCENE_FX)) { mode = ""; return; }
       canvas.hidden = false;
-      canvas.classList.remove("pixel");
       clearInterval(sampleTimer);
       sampleColor(img, false);
       if (quality === "off") { stop(); drawOnce(); } else start();
     } catch (error) {
-      console.error("[background] scene", error);
+      if (request === sceneRequest) {
+        console.error("[background] scene", error);
+        toast("A háttérjelenet nem tölthető be.", [], "error");
+      }
     }
   }
 
-  // --- animált téma: valódi videó (ha kész), addig a procedurális jelenet ---
-  let videoPoll = 0, sceneRequest = 0;
+  let sceneRequest = 0;
   async function showScene(theme) {
     const request = ++sceneRequest;
-    clearTimeout(videoPoll);
-    const status = await fetch(`${window.API_BASE || ""}/api/theme-video/${theme}/status?prepare=true`).then(r => r.json()).catch(() => null);
+    const base = `${window.API_BASE || ""}/api/theme-video/${theme}`;
+    const status = await fetch(base + "/status?prepare=true").then(r => r.json()).catch(() => null);
     if (request !== sceneRequest) return;
-    window.dispatchEvent(new CustomEvent("theme-video-status", { detail: { scene: theme, ...(status || {}) } }));
-    cursorStyle = { blackhole: "lens", minecraft: "blocks", rain: "fog" }[theme] || "lens";
-    web.hidden = true; webFrame = false;
-    canvas.classList.toggle("pixel", status?.kind === "procedural" && theme === "minecraft");
-    if (status?.state === "ready" && status.kind === "scene") {
-      showWallpaperScene(`${window.API_BASE || ""}/api/theme-video/${theme}/files/`, request, cursorStyle);
+    window.dispatchEvent(new CustomEvent("theme-video-status", { detail: { scene: theme, ...status } }));
+    if (status?.state === "processing") {
+      setTimeout(() => { if (request === sceneRequest) showScene(theme); }, 1500);
       return;
     }
-    if (status?.state === "ready" && status.kind === "web") {
-      stop(); mode = ""; canvas.hidden = true;
-      web.src = `${window.API_BASE || ""}/api/theme-video/${theme}/files/${status.file || "index.html"}?v=${status.version || 0}`;
-      web.hidden = false; webFrame = true;
+    if (status?.state !== "ready") {
+      if (status?.message) toast(status.message, [], "error");
       return;
     }
-    if (status?.state === "ready" && status.kind === "video" && initGL()) {
-      const src = `${window.API_BASE || ""}/api/theme-video/${theme}?v=${status.version || 0}`;
-      if (!sceneVideo.src.endsWith(src)) {
-        sceneVideo.src = src;
-        await new Promise(resolve => { sceneVideo.oncanplay = resolve; sceneVideo.onerror = resolve; setTimeout(resolve, 6000); });
+    const cursor = { blackhole: "lens", minecraft: "blocks", rain: "fog" }[theme];
+    cursorStyle = cursor;
+    if (status.kind === "web") {
+      stop(); mode = ""; canvas.hidden = true; sceneVideo.pause();
+      showWeb(`${base}/files/${encodeURI(status.file)}?v=${status.version}`, true);
+      return;
+    }
+    hideWeb();
+    if (status.kind === "scene") {
+      sceneVideo.pause();
+      showWallpaperScene(`${base}/files/`, request, cursor);
+      return;
+    }
+    if (status.kind !== "video" || !initGL()) return;
+    const src = `${base}?v=${status.version}`;
+    if (sceneVideo.getAttribute("src") !== src) {
+      sceneVideo.src = src;
+      try { await sceneVideo.play(); }
+      catch {
+        if (request === sceneRequest) toast("A háttérvideó nem játszható le.", [], "error");
+        return;
       }
-      if (request !== sceneRequest) return;
-      videoTex ||= texture();
-      fogTex ||= texture();
-      fogCtx.fillStyle = "#fff"; fogCtx.fillRect(0, 0, fogCanvas.width, fogCanvas.height);
-      mode = "video";
-      if (!useProgram("video", VIDEO_FX)) { mode = ""; return; }
-      canvas.hidden = false;
-      sceneVideo.play().catch(() => {});
-      clearInterval(sampleTimer);
-      sampleTimer = setInterval(() => { if (!document.hidden) sampleColor(sceneVideo, false); }, 600);
-      if (quality === "off") { stop(); setTimeout(drawOnce, 200); } else start();
-      return;
     }
-    // még nincs kész: procedurális jelenet, és figyeljük, mikor lesz kész a videó
-    mode = "procedural";
-    if (!useProgram(theme, SCENES[theme])) { canvas.hidden = true; return; }
-    canvas.classList.toggle("pixel", theme === "minecraft");
+    if (request !== sceneRequest) return;
+    videoTex ||= texture();
+    fogTex ||= texture();
+    fogCtx.fillStyle = "#fff"; fogCtx.fillRect(0, 0, fogCanvas.width, fogCanvas.height);
+    mode = "video";
+    if (!useProgram("video", VIDEO_FX)) { mode = ""; return; }
     canvas.hidden = false;
-    if (quality === "off") { stop(); drawOnce(); } else start();
-    if (status && ["downloading", "processing"].includes(status.state)) {
-      videoPoll = setTimeout(() => { if (sceneName === theme) showScene(theme); }, 2500);
+    clearInterval(sampleTimer);
+    if (quality === "off") { sceneVideo.pause(); stop(); drawOnce(); }
+    else {
+      sceneVideo.play().catch(() => {});
+      sampleTimer = setInterval(() => { if (!document.hidden) sampleColor(sceneVideo, false); }, 600);
+      start();
     }
   }
 
   // --- nyilvános API ---
   window.backgroundEngine = {
     apply(theme, settings = {}) {
-      quality = settings.animations || "high";
+      quality = reducedMotion.matches ? "off" : (settings.animations || "high");
       fxEnabled = settings.scene_effects !== false;
       const custom = theme?.startsWith?.("custom:") ? (settings.custom_themes || []).find(t => "custom:" + t.id === theme) : null;
-      const animated = theme in SCENES;
+      const animated = SCENES.includes(theme);
       document.body.classList.toggle("animated-bg", animated || !!custom);
       document.body.classList.toggle("glass-high", (animated || !!custom) && quality === "high");
       layer.dataset.scene = custom ? "custom" : animated ? theme : "";
       if (custom) {
-        if (custom.kind !== "scene") { stop(); sceneRequest++; mode = ""; canvas.hidden = true; }
+        if (!customKey || custom.kind !== "scene") { stop(); sceneRequest++; mode = ""; canvas.hidden = true; }
         sceneName = "";
         sceneVideo.pause();
         clearInterval(sampleTimer);
@@ -1148,19 +882,30 @@ void main(){
         showCustom(custom);
         return;
       }
-      clearCustom();
+      if (customKey) clearCustom();
       root.style.setProperty("--bg-dim", String((settings.background_dim ?? 35) / 100));
       if (!animated) {
         stop(); sceneRequest++; mode = ""; sceneName = ""; canvas.hidden = true; sceneVideo.pause();
+        hideWeb();
+        clearInterval(sampleTimer);
         sceneVideo.removeAttribute("src"); sceneVideo.load();
         surfaceMaterial("");
         return;
       }
       surfaceMaterial(theme);
-      if (sceneName !== theme) { sceneName = theme; sceneVideo.removeAttribute("src"); }
+      if (sceneName !== theme) {
+        stop();
+        mode = "";
+        canvas.hidden = true;
+        sceneName = theme;
+        sceneVideo.pause();
+        sceneVideo.removeAttribute("src");
+        hideWeb();
+        clearInterval(sampleTimer);
+      }
       showScene(theme);
     },
-    scenes: Object.keys(SCENES),
+    scenes: SCENES,
     benchmark(frames = 20) {   // fejlesztői mérés: átlagos GPU-idő képkockánként (ms)
       if (!gl || !current) return null;
       const t0 = performance.now();

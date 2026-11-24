@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cyberpunk City Fisherman Rain Effects</title>
+  <meta name="author" content="Zanji; RainEffect by Lucas Bebber for Codrops">
+  <style>
+    html, body { margin: 0; overflow: hidden; background: #000; }
+    canvas { position: fixed; inset: 0; display: block; width: 100% !important; height: 100% !important; object-fit: cover; }
+  </style>
+  <script>
+    let quality = "high";
+    const paused = [];
+    function scheduleRainFrame(draw) {
+      if (quality === "off") paused.push(draw);
+      else if (quality === "low") setTimeout(() => requestAnimationFrame(draw), 32);
+      else requestAnimationFrame(draw);
+    }
+    addEventListener("message", event => {
+      if (event.source !== parent || event.data?.type !== "dl-animation") return;
+      quality = event.data.quality;
+      if (quality !== "off") paused.splice(0).forEach(scheduleRainFrame);
+    });
+  </script>
+  <script src="js/index.min.js" defer></script>
+</head>
+<body>
+  <canvas id="container" aria-hidden="true"></canvas>
+  <!-- RainEffect uses these selectors to initialize its weather presets. -->
+  <div hidden>
+    <div class="slide slide--current" id="slide-1" data-weather="rain"></div>
+    <div class="slide" id="slide-2" data-weather="drizzle"></div>
+    <div class="slide" id="slide-3" data-weather="sunny"></div>
+    <div class="slide" id="slide-4" data-weather="fallout"></div>
+    <div class="slide" id="slide-5" data-weather="storm"></div>
+    <a href="#slide-1"></a><a href="#slide-2"></a><a href="#slide-3"></a>
+    <a href="#slide-4"></a><a href="#slide-5"></a>
+  </div>
+</body>
+</html>

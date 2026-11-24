@@ -1,9 +1,8 @@
 """Custom background themes: images, videos and Wallpaper Engine wallpapers.
 
 Each theme keeps its own media, UI colours, dimming and sound settings. Wallpaper
-Engine "video" items are imported as videos, "web" items as a sandboxed HTML page;
-"scene" items use the engine's proprietary renderer, so only their animated preview
-can be imported.
+Engine video and web projects keep their original media. Scene imports convert the
+original layers and supported effects for the app's renderer.
 """
 from __future__ import annotations
 
@@ -102,7 +101,7 @@ class Backgrounds:
             target = self.folder / f"{theme_id}-web"
             shutil.copytree(folder, target)
             entry = self._entry(theme_id, title, "web", project["file"], folder=target.name, source="Wallpaper Engine",
-                                properties=_default_properties(project))
+                                properties=default_properties(project))
             self._thumbnail(entry, preview=target / (project.get("preview") or "preview.jpg"))
             self._write(self.themes() + [entry])
             return entry
@@ -112,11 +111,8 @@ class Backgrounds:
             target = self.folder / f"{theme_id}-scene"
             try:
                 wallpaper_scene.convert(folder, target)
-            except Exception as exc:  # noqa: BLE001 - fall back to the animated preview
+            except Exception as exc:
                 shutil.rmtree(target, ignore_errors=True)
-                preview = folder / (project.get("preview") or "")
-                if project.get("preview") and preview.is_file():
-                    return self.add_file(str(preview), title + " (előnézet)", source="Wallpaper Engine scene")
                 raise ValueError("Ezt a 3D scene hátteret nem sikerült átalakítani.") from exc
             entry = self._entry(theme_id, title, "scene", "scene.json", folder=target.name, source="Wallpaper Engine")
             self._thumbnail(entry, preview=next(iter(sorted(target.glob("layer0.*"))), None))
@@ -203,7 +199,7 @@ def read_project(folder: Path) -> dict | None:
         return None
 
 
-def _default_properties(project: dict) -> dict:
+def default_properties(project: dict) -> dict:
     props = (project.get("general") or {}).get("properties") or {}
     return {key: {"value": value.get("value")} for key, value in props.items() if isinstance(value, dict)}
 
@@ -251,15 +247,23 @@ def discover_wallpapers() -> list[dict]:
         found.append({
             "path": str(folder), "title": project.get("title") or folder.name, "type": kind,
             "supported": kind in ("video", "web", "scene"),
-            "full": kind in ("video", "web", "scene"), "preview": str(preview) if project.get("preview") and preview.is_file() else "",
+            "preview": str(preview) if project.get("preview") and preview.is_file() else "",
         })
-    return sorted(found, key=lambda x: (not x["full"], x["title"].casefold()))
+    return sorted(found, key=lambda x: (not x["supported"], x["title"].casefold()))
 
 
 WEB_BRIDGE = """<script>
 (() => {
   // Downloader bridge: Wallpaper Engine-style properties, mouse forwarding and mute control.
   const props = __PROPS__;
+  const folder = new URL("./", location.href);
+  const imageSrc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src");
+  // Local textures must be loaded with CORS so they can be uploaded to WebGL from this opaque origin.
+  Object.defineProperty(HTMLImageElement.prototype, "src", { ...imageSrc, set(value) {
+    const url = new URL(value, document.baseURI);
+    if (url.origin === folder.origin && url.pathname.startsWith(folder.pathname)) this.crossOrigin = "anonymous";
+    imageSrc.set.call(this, value);
+  } });
   const apply = () => { try { window.wallpaperPropertyListener?.applyUserProperties?.(props); } catch (e) {} };
   window.addEventListener("load", () => setTimeout(apply, 50));
   window.wallpaperRegisterAudioListener = window.wallpaperRegisterAudioListener || (() => {});
@@ -267,6 +271,7 @@ WEB_BRIDGE = """<script>
   const setMuted = (value) => { muted = value; document.querySelectorAll("audio,video").forEach(m => { m.muted = muted; }); };
   new MutationObserver(() => setMuted(muted)).observe(document.documentElement, { childList: true, subtree: true });
   window.addEventListener("message", (event) => {
+    if (event.source !== window.parent) return;
     const data = event.data || {};
     if (data.type === "dl-mouse") {
       const x = data.x * innerWidth, y = data.y * innerHeight;
@@ -282,7 +287,8 @@ WEB_BRIDGE = """<script>
 
 
 def inject_bridge(html: str, properties: dict, muted: bool) -> str:
-    script = WEB_BRIDGE.replace("__PROPS__", json.dumps(properties or {})).replace("__MUTED__", "true" if muted else "false")
+    props = json.dumps(properties or {}).replace("<", r"\u003c")
+    script = WEB_BRIDGE.replace("__MUTED__", "true" if muted else "false").replace("__PROPS__", props)
     match = re.search(r"<head[^>]*>", html, re.IGNORECASE)
     if match:
         return html[:match.end()] + script + html[match.end():]

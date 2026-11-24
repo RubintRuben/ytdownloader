@@ -15,7 +15,7 @@ Windowsos videó- és hangletöltő helyi előnézettel, vágással, galériáva
 - A csatornára kattintva a YouTube-hoz hasonló csatornaoldal nyílik (borítókép, profilkép, feliratkozók, leírás, **Videók / Shorts / Élő** fülek). A **Feliratkozás** gomb a YouTube-on nyitja meg a feliratkozást.
 - A kártyák ⋮ menüjéből közvetlenül is letölthetsz MP4-ben vagy MP3-ban, listához adhatsz, és linket másolhatsz.
 - Szinkronizált videóknál **választható a hangsáv nyelve** az előnézetben és a letöltésnél is.
-- **Feliratok**: kézi, automatikus és gépi fordítású feliratok. Az előnézetben a YouTube-hoz hasonlóan állítható a felirat nyelve, mérete, színe, betűtípusa, háttere és szegélye (`C` billentyű: be/ki). A letöltött videóba beágyazható a felirat, vagy külön `.srt` fájlba menthető; vágásnál a felirat is a kijelölt részhez igazodik.
+- Kézi, automatikus és gépi fordítású **feliratok** is elérhetők. Az előnézetben állítható a felirat nyelve, mérete, színe, betűtípusa, háttere és szegélye (`C` billentyűvel ki- és bekapcsolható). Az MP4-be beágyazhatod vagy az előnézetben választott stílussal a videóra égetheted a feliratot. Külön `.srt` fájlba is mentheted. Vágásnál a felirat a kijelölt részhez igazodik.
 
 ### Galéria
 
@@ -23,7 +23,13 @@ A letöltött fájlok rácsban jelennek meg; a már törölt fájlok eltűnnek. 
 
 ### Megjelenés
 
-A beállítások a címsor **fogaskerék** ikonjával nyílnak. A klasszikus témák mellett három élő, animált téma van — **Fekete lyuk** (gravitációs fénygörbülés, akkréciós korong), **Mélytenger** (fénysugarak, buborékok, moszat) és **Eső** (cseppek az ablakon, villámlás) —, amelyekre a felület fényei is reagálnak. Saját kép vagy videó is beállítható háttérnek; a videó finom átúsztatással ismétlődik, és a felület színe követi. Az animáció minősége (Magas / Energiatakarékos / Ki) állítható.
+A beállításokat az oldalsáv tetején lévő **fogaskerék** nyitja meg. A három animált téma háttere az alkalmazás része, így Steam vagy internetkapcsolat nélkül is működik. A scene típusú hátterekben az alkalmazás az eredeti képréteget és a támogatott effekteket rajzolja ki WebGL-lel.
+
+- **Fekete lyuk** · 1tsDeanTTV. [Black Hole](https://steamcommunity.com/sharedfiles/filedetails/?id=2934185571)
+- **Minecraft** · rilw. [Minecraft Scene](https://steamcommunity.com/sharedfiles/filedetails/?id=2078716698)
+- **Eső** · Zanji. A fénytöréses esőeffektus Lucas Bebber munkája. [Cyberpunk City Fisherman Rain Effects](https://steamcommunity.com/sharedfiles/filedetails/?id=1218076433) · [Codrops RainEffect](https://github.com/codrops/RainEffect)
+
+A **Saját hátterek** alatt képet, videót vagy Wallpaper Engine-hátteret adhatsz hozzá. Az animált témák hátterét külön is lecserélheted és visszaállíthatod a beépítettre.
 
 Az ablak a Windows saját mozgatását és átméretezését használja: a képernyő tetejére húzva teljes méretű lesz, onnan lehúzva visszaáll, és működik az Aero Snap (oldalra húzás, Win+nyilak).
 
@@ -47,7 +53,9 @@ Claude Desktopban a `claude_desktop_config.json` fájlba:
 { "mcpServers": { "downloader": { "command": "C:\\Út\\Downloader.exe", "args": ["--mcp"] } } }
 ```
 
-Ha az app nem fut, a `--mcp` híd elindítja. HTTP-t támogató kliensek közvetlenül a `http://127.0.0.1:<port>/mcp` címre is csatlakozhatnak a beállításokban látható Bearer tokennel. Az eszközök: `search`, `info`, `download`, `jobs`, `cancel`, `library`, `edit`, `delete`, `open` — tömör, kevés tokent használó szöveges válaszokkal.
+Az oldalsáv **AI** gombja mutatja a csatlakozott klienseket és a legutóbbi műveleteiket. Innen egyenként lekapcsolhatod vagy letilthatod a klienseket. A Beállításokból a Claude, Codex, Gemini CLI, Kimi Code, Grok Build és DeepSeek Harness csatlakozási beállításait másolhatod. [Kimi Code](https://www.kimi.com/code/docs/en/kimi-code-cli/customization/mcp.html) · [Grok Build](https://docs.x.ai/build/features/mcp-servers) · [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/mcp/mcp-client)
+
+Ha az app nem fut, a `--mcp` híd elindítja. HTTP-t támogató kliensek közvetlenül a `http://127.0.0.1:<port>/mcp` címre is csatlakozhatnak a beállításokban látható Bearer tokennel. A Downloader MCP-eszközei a `search`, `info`, `download`, `jobs`, `cancel`, `library`, `edit`, `delete` és `open`.
 
 ## Alkalmazásfrissítések
 

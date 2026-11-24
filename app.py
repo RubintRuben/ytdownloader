@@ -2303,7 +2303,12 @@ async def api_settings_update(request: Request):
     changes = await request.json()
     if not isinstance(changes, dict):
         raise HTTPException(400, "Érvénytelen beállítás.")
-    return await asyncio.to_thread(_update_settings, changes)
+    settings = await asyncio.to_thread(_update_settings, changes)
+    if "mcp_blocked" in changes:
+        for session in _mcp_sessions.listing():
+            if session["ai"] in settings["mcp_blocked"]:
+                _mcp_sessions.revoke(session["id"])
+    return settings
 
 
 @app.get("/api/mcp/config")
@@ -2514,7 +2519,7 @@ async def api_library_edit(item_id: str, request: Request):
 
 _backgrounds = backgrounds.Backgrounds(BACKGROUND_DIR, lambda: _load_settings(), lambda s: _save_settings(s),
                                        lambda: _ensure_ffmpeg_on_path(), _settings_lock)
-_theme_videos = theme_media.ThemeVideos(USER_DATA_DIR / "theme-videos", _base_opts,
+_theme_videos = theme_media.ThemeVideos(USER_DATA_DIR / "theme-videos", BASE_DIR / "wallpapers",
                                         lambda: _ensure_ffmpeg_on_path(), lambda m: _log(m))
 
 
@@ -2567,12 +2572,18 @@ async def api_custom_theme_thumb(theme_id: str):
     return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "max-age=600"})
 
 
-def _wallpaper_file(path: Path, entry: bool, properties: dict, muted: bool):
+def _wallpaper_file(path: Path, project: dict, relative: str, muted: bool):
     headers = {"Cache-Control": "no-store", "Content-Security-Policy": "frame-ancestors 'self'"}
-    if entry and path.suffix.lower() in (".html", ".htm"):
-        html = path.read_text(encoding="utf-8", errors="replace")
-        return Response(backgrounds.inject_bridge(html, properties or {}, muted),
-                        media_type="text/html; charset=utf-8", headers=headers)
+    if project.get("kind") == "web":
+        suffix = path.suffix.lower()
+        if suffix in (".html", ".htm", ".svg", ".xml", ".xhtml"):
+            headers["Content-Security-Policy"] += "; sandbox allow-scripts"
+        if suffix in backgrounds.IMAGE | backgrounds.VIDEO | {".svg", ".woff", ".woff2", ".ttf"}:
+            headers["Access-Control-Allow-Origin"] = "*"
+        if suffix in (".html", ".htm") and Path(relative) == Path(project.get("file", "")):
+            html = path.read_text(encoding="utf-8", errors="replace")
+            return Response(backgrounds.inject_bridge(html, project.get("properties") or {}, muted),
+                            media_type="text/html; charset=utf-8", headers=headers)
     return FileResponse(path, headers=headers)
 
 
@@ -2585,26 +2596,24 @@ async def api_custom_theme_files(theme_id: str, relative: str):
     path = _backgrounds.web_file(theme, relative or theme["file"])
     if not path:
         raise HTTPException(404, "A fájl nem található.")
-    return _wallpaper_file(path, theme["kind"] == "web" and Path(relative) == Path(theme["file"]),
-                           theme.get("properties") or {}, not theme.get("sound"))
+    return _wallpaper_file(path, theme, relative, not theme.get("sound"))
 
 
 @app.get("/api/theme-video/{scene}/files/{relative:path}")
 async def api_theme_files(scene: str, relative: str):
-    if scene not in theme_media.THEME_VIDEOS:
+    if scene not in theme_media.DEFAULT_PROJECTS:
         raise HTTPException(404, "Ismeretlen téma.")
-    path = _theme_videos.asset(scene, relative)
-    if not path:
+    asset = await asyncio.to_thread(_theme_videos.asset, scene, relative)
+    if not asset:
         raise HTTPException(404, "A fájl nem található.")
-    custom = _theme_videos.override(scene) or {}
-    return _wallpaper_file(path, custom.get("kind") == "web" and Path(relative) == Path(custom.get("file", "")),
-                           custom.get("properties") or {}, True)
+    path, project = asset
+    return _wallpaper_file(path, project, relative, True)
 
 
 @app.post("/api/theme-video/{scene}/wallpaper")
 async def api_theme_wallpaper(scene: str, request: Request):
     """Use an installed Wallpaper Engine wallpaper as an animated theme's background."""
-    if scene not in theme_media.THEME_VIDEOS:
+    if scene not in theme_media.DEFAULT_PROJECTS:
         raise HTTPException(404, "Ismeretlen téma.")
     target = Path(str((await request.json()).get("path") or ""))
     if not any(root.resolve() in target.resolve().parents for root in backgrounds.steam_libraries()):
@@ -2643,23 +2652,35 @@ async def api_wallpaper_engine_import(request: Request):
 
 @app.get("/api/theme-video/{scene}/status")
 async def api_theme_video_status(scene: str, prepare: bool = False):
-    if scene not in theme_media.THEME_VIDEOS:
+    if scene not in theme_media.DEFAULT_PROJECTS:
         raise HTTPException(404, "Ismeretlen téma.")
-    return _theme_videos.ensure(scene) if prepare else _theme_videos.status(scene)
+    return await asyncio.to_thread(_theme_videos.ensure if prepare else _theme_videos.status, scene)
+
+
+@app.get("/api/theme-video/{scene}/preview")
+async def api_theme_preview(scene: str):
+    path = await asyncio.to_thread(_theme_videos.preview, scene) if scene in theme_media.DEFAULT_PROJECTS else None
+    if not path:
+        raise HTTPException(404, "A téma előnézete nem található.")
+    return FileResponse(path, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/theme-video/{scene}")
 async def api_theme_video(scene: str):
-    if scene not in theme_media.THEME_VIDEOS or not _theme_videos.path(scene).is_file():
+    path = _theme_videos.video_path(scene) if scene in theme_media.DEFAULT_PROJECTS else None
+    if not path:
         raise HTTPException(404, "A háttérvideó még nincs kész.")
-    return FileResponse(_theme_videos.path(scene), media_type="video/mp4", headers={"Cache-Control": "max-age=3600"})
+    return FileResponse(path, media_type="video/mp4", headers={"Cache-Control": "max-age=3600"})
 
 
 @app.post("/api/theme-video/{scene}/reset")
 async def api_theme_video_reset(scene: str):
-    if scene not in theme_media.THEME_VIDEOS:
+    if scene not in theme_media.DEFAULT_PROJECTS:
         raise HTTPException(404, "Ismeretlen téma.")
-    return await asyncio.to_thread(_theme_videos.reset, scene)
+    try:
+        return await asyncio.to_thread(_theme_videos.reset, scene)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 # ----------------------------------------------------------------------------
@@ -3420,7 +3441,7 @@ class _NativeApi:
 
     def pick_theme_video(self, scene: str) -> dict:
         """Replace an animated theme's background with a video or a Wallpaper Engine project.json."""
-        if scene not in theme_media.THEME_VIDEOS:
+        if scene not in theme_media.DEFAULT_PROJECTS:
             return {"ok": False}
         result = self._window.create_file_dialog(
             self._open_dialog_type(),
@@ -3699,6 +3720,12 @@ if __name__ == "__main__":
                     or "node" not in downloader.params["js_runtimes"]
                     or not (STATIC_DIR / "settings.js").is_file()):
                 raise SystemExit(1)
+        with tempfile.TemporaryDirectory() as cache:
+            themes = theme_media.ThemeVideos(Path(cache), BASE_DIR / "wallpapers", lambda: None, _log)
+            for scene in theme_media.DEFAULT_PROJECTS:
+                status = themes.ensure(scene)
+                if status["state"] != "ready" or not themes.asset(scene, status["file"]) or not themes.preview(scene):
+                    raise SystemExit(1)
         if not _start_local_server(0):
             raise SystemExit(1)
     else:

@@ -50,6 +50,7 @@ import os as _os
 
 datas = [
     ("static", "static"),               # a frontend
+    ("wallpapers", "wallpapers"),       # bundled animated theme projects
     ("icon.ico", "."),                  # az app ikonja (a natív ablakhoz, futásidőben)
 ]
 # a session-cookie MASTER fájlok csak akkor, ha léteznek (érzékeny, nincs verziókövetésben)

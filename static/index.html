@@ -14,7 +14,7 @@
   <body>
     <!-- Animált / egyéni háttér -->
     <div id="bgLayer" class="bg-layer" aria-hidden="true">
-      <canvas id="bgCanvas"></canvas>
+      <canvas id="bgCanvas" hidden></canvas>
       <video id="bgVideoA" muted playsinline preload="auto" hidden></video>
       <video id="bgVideoB" muted playsinline preload="auto" hidden></video>
       <img id="bgImage" alt="" hidden>
@@ -45,7 +45,7 @@
           <i class="ai-dot" id="aiDot"></i>
         </button>
       </div>
-      <div class="ai-popover" id="aiPopover" role="dialog" aria-label="AI-kapcsolatok" hidden>
+      <div class="ai-popover" id="aiPopover" role="dialog" aria-label="AI-kapcsolatok" popover="auto">
         <header class="ai-pop-head">
           <strong>AI-kapcsolatok</strong>
           <span class="ai-mode-chip" id="aiModeChip"></span>
@@ -105,10 +105,9 @@
         <div class="settings-panes">
           <section class="settings-pane" data-pane="look">
             <h3>Animált témák</h3>
-            <p class="pane-hint">Élő, varrat nélkül ismétlődő videóháttér. A felület is reagál rá: esőnél nedves üveg, a fekete lyuknál csillagok, a mélytengerben fényhullámok, és a kurzorodra is reagál a jelenet.</p>
             <div class="theme-grid animated" id="animatedThemeGrid"></div>
             <h3>Saját hátterek</h3>
-            <p class="pane-hint">Kép, videó vagy Wallpaper Engine háttér (videó és web típus). Mindegyikhez külön beállíthatod a felület színét, a sötétítést és a hangot.</p>
+            <p class="pane-hint">Képhez, videóhoz és Wallpaper Engine háttérhez külön állíthatod a színeket, a sötétítést és a hangot.</p>
             <div class="theme-grid custom" id="customThemeGrid"></div>
             <h3>Klasszikus témák</h3>
             <div class="theme-grid" id="themeGrid"></div>
@@ -196,7 +195,7 @@
                 <p id="updateAccessStatus" role="status"></p>
               </details>
             </div>
-            <h3>Háttérvideók forrása</h3>
+            <h3>Animált hátterek forrásai</h3>
             <ul class="credits" id="themeCredits"></ul>
             <h3>Billentyűparancsok</h3>
             <ul class="shortcut-list">
@@ -602,7 +601,7 @@
         <h2 id="weTitle">Wallpaper Engine hátterek</h2>
         <button type="button" class="icon-btn" id="weClose" aria-label="Bezárás">✕</button>
       </header>
-      <p class="pane-hint">A Steamen telepített háttereid. A videó és web típusúak teljes minőségben működnek; a 3D „scene” háttereket a Wallpaper Engine saját motorja rajzolja, ezekből csak az animált előnézet importálható.</p>
+      <p class="pane-hint">A Steamen telepített háttereid. A jelenetekben az app az eredeti képréteget és a támogatott effekteket jeleníti meg.</p>
       <div class="we-grid" id="weGrid"></div>
       <div class="dialog-actions spread">
         <button type="button" class="btn-list" id="weBrowse">Másik mappa (project.json)…</button>
@@ -622,7 +621,7 @@
       </form>
     </dialog>
 
-    <div class="context-menu" id="contextMenu" role="menu" hidden></div>
+    <div class="context-menu" id="contextMenu" role="menu" popover="auto"></div>
     <div class="approvals" id="approvals" aria-live="polite"></div>
     <div class="toasts" id="toasts" aria-live="polite"></div>
     <div class="resize-edges" id="resizeEdges" hidden>

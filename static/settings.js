@@ -2,7 +2,7 @@
   const animatedThemes = {
     blackhole: ["Fekete lyuk", "Csillagos üveg, a kurzor fényt görbít"],
     minecraft: ["Minecraft", "Pixeles felület, kattintásra kockatörés"],
-    rain: ["Eső", "Párás üveg, amit a kurzor letöröl"],
+    rain: ["Eső", "Cyberpunk City, esőcseppek és parallaxis"],
   };
   const themes = {
     dark: ["Sötét", "Éjkék, ibolya"],
@@ -20,9 +20,9 @@
     claude: { name: "Claude", label: "Claude Code · parancs (Claude Desktop: lent a JSON)", kind: "claude" },
     openai: { name: "OpenAI", label: "Codex CLI · parancs", kind: "codex" },
     gemini: { name: "Gemini", label: "Gemini CLI · parancs", kind: "gemini" },
-    kimi: { name: "Kimi", label: "Kimi Code CLI · parancs", kind: "kimi" },
+    kimi: { name: "Kimi", label: "Kimi Code · ~/.kimi-code/mcp.json", kind: "json" },
     grok: { name: "Grok", label: "Grok Build · ~/.grok/config.toml", kind: "grok" },
-    deepseek: { name: "DeepSeek", label: "DeepSeek Harness · MCP-kliens beállítás (JSON)", kind: "json" },
+    deepseek: { name: "DeepSeek", label: "DeepSeek Harness · a profil cordis.patch.yml fájlja", kind: "deepseek" },
   };
   window.AI_SETUP = AI_SETUP;
   const dialog = $("settingsDialog");
@@ -44,6 +44,7 @@
   let updatePoll;
   let checkInterval;
   let native;
+  let wallpaperTarget;
   let settings = window.appSettings = { custom_themes: [] };
   const videoStatus = {};
 
@@ -81,22 +82,20 @@
       applyTheme(key, true);
     };
     button.addEventListener("click", choose);
-    button.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(e); } });
+    button.addEventListener("keydown", (e) => { if (e.target === button && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); choose(e); } });
     button.addEventListener("click", async (event) => {
       const act = event.target.closest("[data-act]")?.dataset.act;
       if (act === "video") {
         showContextMenu(event.target.closest("[data-act]"), [
           { label: "Wallpaper Engine háttér…", action: () => openWallpaperEngine(key) },
-          { label: "Videó vagy project.json fájl…", action: async () => {
-            if (!native?.pick_theme_video) { toast("Ez az asztali alkalmazásban érhető el.", [], "error"); return; }
-            const result = await native.pick_theme_video(key);
-            if (result?.error) toast(result.error, [], "error");
-            if (result?.ok) { updateVideoTile(key, result.status); pollVideo(key); if (themePreference === key) applyTheme(key); }
-          } },
+          { label: "Videó vagy project.json fájl…", action: () => pickAnimatedBackground(key) },
         ]);
       } else if (act === "reset") {
-        const status = await postJSON(`${API}/api/theme-video/${key}/reset`).catch(() => null);
-        if (status) { updateVideoTile(key, status); pollVideo(key); }
+        try {
+          const status = await postJSON(`${API}/api/theme-video/${key}/reset`);
+          updateVideoTile(key, status);
+          if (themePreference === key) applyTheme(key);
+        } catch (error) { toast(error.message, [], "error"); }
       }
     });
     container.append(button);
@@ -105,33 +104,37 @@
   for (const [key, value] of Object.entries(animatedThemes)) tile(key, value, $("animatedThemeGrid"), "animated");
   for (const [key, value] of Object.entries(themes)) tile(key, value, $("themeGrid"), "classic");
 
+  async function pickAnimatedBackground(scene) {
+    if (!native?.pick_theme_video) { toast("Ez az asztali alkalmazásban érhető el.", [], "error"); return; }
+    const result = await native.pick_theme_video(scene);
+    if (result?.error) toast(result.error, [], "error");
+    if (result?.ok) {
+      updateVideoTile(scene, result.status);
+      if (result.status.state === "processing") pollVideo(scene);
+      else if (themePreference === scene) applyTheme(scene);
+    }
+  }
+
   function updateVideoTile(scene, status) {
     videoStatus[scene] = status;
     const tileEl = document.querySelector(`.theme-tile[data-value="${scene}"]`);
     if (!tileEl || !status) return;
     const label = tileEl.querySelector(".tile-status");
-    label.textContent = status.state === "ready" ? (status.custom ? ({ scene: "Wallpaper Engine scene", web: "Wallpaper Engine web" }[status.kind] || "Saját videó") : "")
-      : status.state === "downloading" ? `Letöltés ${status.progress || 0}%`
-      : status.state === "processing" ? "Előkészítés…" : status.state === "error" ? "Nem érhető el" : "Első használatkor letöltődik";
+    label.textContent = status.state === "processing" ? "Előkészítés…" : status.state === "error" ? "Nem érhető el" : (status.custom || "");
+    label.title = status.message || status.custom || "";
     tileEl.querySelector('[data-act="reset"]').hidden = !status.custom;
     const video = tileEl.querySelector("video");
     const still = tileEl.querySelector(".theme-swatch img");
-    if (status.state === "ready" && (status.kind === "scene" || status.kind === "web")) {
-      still.src = `${API}/api/theme-video/${scene}/files/${status.kind === "scene" ? "layer0.jpg" : "preview.jpg"}?v=${status.version || 0}`;
-      still.onerror = () => { if (status.kind === "scene" && !still.src.includes("layer0.png")) still.src = `${API}/api/theme-video/${scene}/files/layer0.png?v=${status.version || 0}`; };
-      still.hidden = false;
-      video.hidden = true;
-      renderCredits();
-      return;
-    }
-    still.hidden = true;
-    video.hidden = status.kind === "procedural";
-    if (status.state === "ready" && video && !video.dataset.v && status.kind === "video") {
-      video.dataset.v = "1";
-      video.src = `${API}/api/theme-video/${scene}?v=${status.version || 0}`;
-    }
-    if (status.state === "ready" && video && video.dataset.v && status.version && !video.src.includes(`v=${status.version}`)) {
-      video.src = `${API}/api/theme-video/${scene}?v=${status.version}`;
+    const showVideo = status.state === "ready" && status.kind === "video";
+    video.hidden = !showVideo;
+    still.hidden = showVideo || (status.kind !== "scene" && status.kind !== "web");
+    if (showVideo) {
+      const src = `${API}/api/theme-video/${scene}?v=${status.version}`;
+      if (video.getAttribute("src") !== src) video.src = src;
+      if (dialog.open) video.play().catch(() => {});
+    } else if (!still.hidden) {
+      const src = `${API}/api/theme-video/${scene}/preview?v=${status.version || status.state}`;
+      if (still.getAttribute("src") !== src) still.src = src;
     }
     renderCredits();
   }
@@ -140,8 +143,9 @@
     setTimeout(async () => {
       const status = await fetch(`${API}/api/theme-video/${scene}/status`).then(r => r.json()).catch(() => null);
       updateVideoTile(scene, status);
-      if (status && ["downloading", "processing"].includes(status.state)) pollVideo(scene);
-      else if (status?.state === "ready" && themePreference === scene) applyTheme(scene);
+      if (status?.state === "processing") pollVideo(scene);
+      else if (status && ["ready", "available"].includes(status.state) && themePreference === scene) applyTheme(scene);
+      if (status?.message) toast(status.message, [], "error");
     }, 1500);
   }
   async function loadVideoStatuses() {
@@ -155,9 +159,15 @@
       const s = videoStatus[scene];
       const li = document.createElement("li");
       if (!s) return li;
-      li.textContent = s.custom ? `${animatedThemes[scene][0]}: saját háttér (${s.custom})`
-        : s.url ? `${animatedThemes[scene][0]}: „${s.title}” – ${s.author} (${s.license}), ${s.url}`
-        : `${animatedThemes[scene][0]}: ${s.title}`;
+      li.textContent = `${animatedThemes[scene][0]} · ${s.title}`;
+      if (s.url) {
+        const link = document.createElement("a");
+        link.href = s.url;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.textContent = "Steam Workshop";
+        li.append(" · ", link);
+      }
       return li;
     }));
   }
@@ -175,7 +185,7 @@
       el.dataset.value = "custom:" + theme.id;
       el.tabIndex = 0;
       el.setAttribute("role", "button");
-      const kindLabel = { image: "Kép", video: "Videó", web: "Web" }[theme.kind] || "";
+      const kindLabel = { image: "Kép", video: "Videó", web: "Web", scene: "Scene" }[theme.kind] || "";
       el.innerHTML = `
         <span class="theme-swatch custom">${theme.hasThumb ? `<img src="${API}/api/custom-themes/${theme.id}/thumb" alt="">` : ""}
           <i class="kind">${kindLabel}${theme.source ? " · WE" : ""}</i>
@@ -199,10 +209,11 @@
     const add = document.createElement("button");
     add.type = "button";
     add.className = "theme-tile add-tile";
-    add.innerHTML = `<span class="plus">+</span><span class="tile-caption"><strong>Új háttér</strong><small>Kép, videó, Wallpaper Engine</small></span>`;
+    add.setAttribute("aria-haspopup", "menu");
+    add.innerHTML = `<span class="plus" aria-hidden="true"><svg class="line-icon" viewBox="0 0 24 24" width="24" height="24"><path d="M12 5v14M5 12h14"/></svg></span><span class="tile-caption"><strong>Új háttér</strong><small>Kép, videó, Wallpaper Engine</small></span>`;
     add.addEventListener("click", () => showContextMenu(add, [
       { label: "Kép vagy videó…", action: pickBackground },
-      { label: "Wallpaper Engine háttér…", action: openWallpaperEngine },
+      { label: "Wallpaper Engine háttér…", action: () => openWallpaperEngine() },
     ]));
     grid.append(add);
     markActive();
@@ -283,7 +294,7 @@
     $("teDim").value = theme.dim ?? 45;
     $("teSound").checked = !!theme.sound;
     $("teVolume").value = theme.volume ?? 60;
-    $("teSoundRow").hidden = theme.kind === "image";
+    $("teSoundRow").hidden = !["video", "web"].includes(theme.kind);
     $("teSource").textContent = theme.kind === "web" ? "Wallpaper Engine web-háttér: elkülönítve fut, megkapja az egérmozgást és a saját beállításait." : "";
     $("tePreview").innerHTML = theme.hasThumb ? `<img src="${API}/api/custom-themes/${theme.id}/thumb" alt="">` : "";
     const accentPick = (v) => { editing.accent = v; preview(); };
@@ -297,7 +308,7 @@
   $("teSound").addEventListener("change", (e) => { if (editing) { editing.sound = e.target.checked; preview(); } });
   $("teVolume").addEventListener("input", (e) => { if (editing) { editing.volume = Number(e.target.value); preview(); } });
   $("teName").addEventListener("input", (e) => { if (editing) editing.name = e.target.value; });
-  $("teCancel").addEventListener("click", () => {
+  function cancelEditor() {
     if (editingBefore) {
       const idx = settings.custom_themes.findIndex(t => t.id === editingBefore.id);
       if (idx >= 0) settings.custom_themes[idx] = editingBefore;
@@ -305,7 +316,9 @@
     }
     editing = null;
     $("themeEditor").close();
-  });
+  }
+  $("teCancel").addEventListener("click", cancelEditor);
+  $("themeEditor").addEventListener("cancel", event => { event.preventDefault(); cancelEditor(); });
   $("teDelete").addEventListener("click", async () => {
     const theme = editingBefore;
     $("themeEditor").close();
@@ -314,8 +327,10 @@
   });
   $("themeEditorForm").addEventListener("submit", async (event) => {
     if (event.submitter?.value !== "ok" || !editing) return;
+    event.preventDefault();
     const theme = editing;
-    editing = null;
+    const save = event.submitter;
+    save.disabled = true;
     try {
       await postJSON(`${API}/api/custom-themes/${theme.id}`, {
         name: theme.name, accent: theme.accent, surface: theme.surface, dim: theme.dim, sound: theme.sound, volume: theme.volume,
@@ -323,12 +338,17 @@
       await loadCustomThemes();
       changedTheme = true;
       applyTheme("custom:" + theme.id, true);
+      editing = null;
+      $("themeEditor").close();
     } catch (error) { toast(error.message, [], "error"); }
+    finally { save.disabled = false; }
   });
 
   // --- Wallpaper Engine böngésző ---
   async function openWallpaperEngine(targetScene) {
+    wallpaperTarget = targetScene;
     const grid = $("weGrid");
+    $("weStatus").textContent = "";
     $("weTitle").textContent = targetScene ? `Wallpaper Engine háttér – ${animatedThemes[targetScene][0]} téma` : "Wallpaper Engine hátterek";
     grid.innerHTML = `<p class="pane-hint">Keresés a Steam-könyvtárakban…</p>`;
     $("weDialog").showModal();
@@ -338,11 +358,11 @@
       grid.replaceChildren(...items.map(item => {
         const card = document.createElement("button");
         card.type = "button";
-        card.className = "we-card" + (item.full ? "" : " limited");
+        card.className = "we-card";
         card.disabled = !item.supported;
         const type = { video: "Videó", web: "Web", scene: "Scene" }[item.type] || item.type;
         card.innerHTML = `<span class="we-thumb">${item.preview ? `<img src="${API}/api/wallpaper-engine/preview?path=${encodeURIComponent(item.preview)}" alt="" loading="lazy">` : ""}
-          <i>${escapeHtml(type)}${item.full ? "" : " · csak előnézet"}</i></span><strong></strong>`;
+          <i>${escapeHtml(type)}</i></span><strong></strong>`;
         card.querySelector("strong").textContent = item.title;
         card.addEventListener("click", async () => {
           card.classList.add("busy");
@@ -353,7 +373,7 @@
               $("weDialog").close();
               $("weStatus").textContent = "";
               updateVideoTile(targetScene, status);
-              pollVideo(targetScene);
+              if (status.state === "processing") pollVideo(targetScene);
               changedTheme = true;
               applyTheme(targetScene, true);
               return;
@@ -374,7 +394,11 @@
     }
   }
   $("weClose").addEventListener("click", () => $("weDialog").close());
-  $("weBrowse").addEventListener("click", async () => { $("weDialog").close(); await pickBackground(); });
+  $("weBrowse").addEventListener("click", () => {
+    $("weDialog").close();
+    if (wallpaperTarget) pickAnimatedBackground(wallpaperTarget);
+    else pickBackground();
+  });
   window.openWallpaperEngine = openWallpaperEngine;
 
   // --- téma alkalmazása ---
@@ -480,7 +504,8 @@
     try {
       Object.assign(settings, await postJSON(`${API}/api/settings`, changes));
       renderSettings();
-    } catch (error) { toast(error.message, [], "error"); }
+      return true;
+    } catch (error) { toast(error.message, [], "error"); return false; }
   }
   window.updateAppSettings = update;
 
@@ -516,12 +541,15 @@
     const cmd = [mcpConfig.command, ...mcpConfig.args].map(quote).join(" ");
     const json = JSON.stringify({ mcpServers: { downloader: { command: mcpConfig.command, args: mcpConfig.args } } }, null, 2);
     const toml = `[mcp_servers.downloader]\ncommand = ${JSON.stringify(mcpConfig.command)}\nargs = ${JSON.stringify(mcpConfig.args)}`;
+    const yaml = ["- id: mcp-downloader", "  name: '@deepseek-ai/dsh-mcp-client'", "  config:",
+      "    serverName: downloader", "    transport: stdio", `    command: ${JSON.stringify(mcpConfig.command)}`,
+      `    args: ${JSON.stringify(mcpConfig.args)}`].join("\n");
     return {
       claude: `claude mcp add downloader -- ${cmd}\n\n# Claude Desktop – claude_desktop_config.json:\n${json}`,
       codex: `codex mcp add downloader -- ${cmd}`,
       gemini: `gemini mcp add downloader ${cmd}`,
-      kimi: `kimi mcp add --transport stdio downloader -- ${cmd}`,
       grok: `grok mcp add downloader -- ${cmd}\n\n# vagy ~/.grok/config.toml:\n${toml}`,
+      deepseek: yaml,
       json,
     }[AI_SETUP[ai].kind];
   }
