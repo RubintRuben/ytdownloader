@@ -24,7 +24,7 @@ async function attachPreviewStream(video, url, start, duration, hasAudio, signal
   if (duration > 0) source.duration = duration;
   buffer.timestampOffset = start;
 
-  const response = await fetch(url + "?start=" + start.toFixed(3), { signal, cache: "no-store" });
+  const response = await fetch(url + (url.includes("?") ? "&" : "?") + "start=" + start.toFixed(3), { signal, cache: "no-store" });
   if (!response.ok || !response.body) throw new Error("Preview stream unavailable");
   const reader = response.body.getReader();
   let positioned = false;

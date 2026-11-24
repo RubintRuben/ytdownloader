@@ -7,19 +7,38 @@
     <link rel="stylesheet" href="style.css" />
     <link rel="stylesheet" href="themes.css" />
     <link rel="stylesheet" href="desktop.css" />
+    <link rel="stylesheet" href="ui.css" />
     <link rel="icon" id="appFavicon" type="image/x-icon" href="theme-icons/dark.ico" />
   </head>
   <body>
-    <header class="titlebar">
-      <div class="titlebar-drag pywebview-drag-region"><img data-app-icon src="theme-icons/dark.ico" width="19" height="19" alt=""><span>Downloader</span></div>
+    <!-- Animált / egyéni háttér -->
+    <div id="bgLayer" class="bg-layer" aria-hidden="true">
+      <canvas id="bgCanvas"></canvas>
+      <video id="bgVideoA" muted playsinline preload="auto" hidden></video>
+      <video id="bgVideoB" muted playsinline preload="auto" hidden></video>
+      <img id="bgImage" alt="" hidden>
+      <div class="bg-dim"></div>
+      <div class="bg-flash"></div>
+    </div>
+
+    <header class="titlebar" id="titlebar">
+      <div class="titlebar-drag" id="titlebarDrag"><img data-app-icon src="theme-icons/dark.ico" width="19" height="19" alt=""><span>Downloader</span></div>
+      <button id="aiIndicator" type="button" class="ai-indicator" hidden title="AI-hozzáférés (MCP)">
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 5.6L20 10l-5.8 2.4L12 18l-2.2-5.6L4 10l5.8-2.4z"/></svg>
+        <span id="aiIndicatorText">AI</span>
+      </button>
       <button id="updateShortcut" type="button" class="update-shortcut" hidden>Frissítés</button>
+      <button id="settingsBtn" type="button" class="titlebar-btn" title="Beállítások" aria-label="Beállítások">
+        <svg class="line-icon" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1.1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/></svg>
+      </button>
       <div class="window-controls" id="windowControls" hidden>
         <button data-window="minimize" aria-label="Kis méret" title="Kis méret"><svg viewBox="0 0 16 16"><path d="M3 8h10"/></svg></button>
         <button data-window="maximize" aria-label="Teljes méret / visszaállítás" title="Teljes méret / visszaállítás"><svg class="maximize-icon" viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" rx="1"/></svg><svg class="restore-icon" viewBox="0 0 16 16"><path d="M6 4V2.8h7.2V10H12"/><rect x="3" y="5.5" width="8" height="7.5" rx="1"/></svg></button>
         <button data-window="close" aria-label="Bezárás" title="Bezárás"><svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8"/></svg></button>
       </div>
     </header>
-    <!-- ===== Felső sáv: márka + tabok ===== -->
+
+    <!-- ===== Oldalsáv ===== -->
     <nav class="topbar" aria-label="Főmenü">
       <div class="brand">
         <img class="brand-mark" data-app-icon src="theme-icons/dark.ico" width="36" height="36" alt="">
@@ -37,62 +56,147 @@
       </div>
       <span class="nav-label library-label">MÉDIATÁR</span>
 
-      <!-- Letöltési lista gomb -->
+      <button id="galleryBtn" class="jobs-btn" title="Letöltött fájlok galériája">
+        <svg class="line-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="m3 16 5-5 4 4 3-3 6 6"/><circle cx="16" cy="9" r="1.6"/></svg>
+        <span>Galéria</span>
+        <span id="galleryBadge" class="jobs-badge" hidden>0</span>
+      </button>
       <button id="listBtn" class="jobs-btn" title="Letöltési lista">
         <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M3 5h13v2H3V5zm0 4h13v2H3V9zm0 4h9v2H3v-2zm16-1.5L23 15l-1.4 1.4-2.6-2.6-2.6 2.6L15 15l4-4z"/></svg>
         <span>Lista</span>
         <span id="listBadge" class="jobs-badge" hidden>0</span>
       </button>
-
-      <!-- Folyamatok gomb (jobbra) -->
       <button id="jobsBtn" class="jobs-btn" title="Folyamatok">
         <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8zm.5-13H11v6l5.2 3.1.8-1.3-4.5-2.7z"/></svg>
         <span>Letöltések</span>
         <span id="jobsBadge" class="jobs-badge" hidden>0</span>
       </button>
       <div class="sidebar-foot">
-        <button id="settingsBtn" type="button" class="jobs-btn" title="Beállítások">
-          <svg class="line-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="8" cy="7" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="11" cy="17" r="2"/></svg>
-          <span>Beállítások</span>
-        </button>
         <span class="sidebar-version" id="sidebarVersion"></span>
       </div>
     </nav>
 
+    <!-- ===== Beállítások ===== -->
     <dialog class="settings-dialog" id="settingsDialog" aria-labelledby="settingsTitle">
       <header class="settings-header">
         <h2 id="settingsTitle">Beállítások</h2>
-        <form method="dialog"><button class="icon-btn" title="Bezárás" aria-label="Beállítások bezárása" autofocus>✕</button></form>
+        <form method="dialog"><button class="icon-btn" title="Bezárás" aria-label="Beállítások bezárása">✕</button></form>
       </header>
-      <section class="settings-section" aria-labelledby="themeTitle">
-        <h3 id="themeTitle">Megjelenés</h3>
-        <div class="theme-grid" id="themeGrid"></div>
-      </section>
-      <section class="settings-section update-section" aria-labelledby="versionTitle">
-        <div>
-          <h3 id="versionTitle">Alkalmazásverzió <span class="version-chip" id="currentVersion"></span></h3>
-          <p id="updateStatus" role="status"></p>
+      <div class="settings-body">
+        <div class="settings-tabs" role="tablist" aria-label="Beállítások részei">
+          <button role="tab" type="button" data-pane="look" aria-selected="true">Megjelenés</button>
+          <button role="tab" type="button" data-pane="download" aria-selected="false">Letöltés</button>
+          <button role="tab" type="button" data-pane="ai" aria-selected="false">AI · MCP</button>
+          <button role="tab" type="button" data-pane="about" aria-selected="false">Frissítés</button>
         </div>
-        <div class="update-actions">
-          <button class="btn-list" type="button" id="checkUpdate" hidden>Ellenőrzés</button>
-          <button class="btn-primary" type="button" id="installUpdate" hidden>Frissítés</button>
+        <div class="settings-panes">
+          <section class="settings-pane" data-pane="look">
+            <h3>Animált témák</h3>
+            <p class="pane-hint">Élő, folyamatosan ismétlődő háttér; a felület fényei követik a jelenetet.</p>
+            <div class="theme-grid animated" id="animatedThemeGrid"></div>
+            <h3>Klasszikus témák</h3>
+            <div class="theme-grid" id="themeGrid"></div>
+            <h3>Saját háttér</h3>
+            <div class="custom-bg-row">
+              <div class="custom-bg-preview" id="customBgPreview"><span>Nincs kiválasztva</span></div>
+              <div class="custom-bg-actions">
+                <button type="button" class="btn-primary" id="pickBackground">Kép vagy videó választása…</button>
+                <button type="button" class="btn-list" id="useCustomBg" hidden>Saját háttér használata</button>
+                <label class="field-row">Sötétítés <input type="range" id="bgDim" min="0" max="90" value="55"></label>
+                <p class="pane-hint">MP4/WebM videó vagy JPG/PNG/WebP/GIF kép. A videó hang nélkül, finom átúsztatással ismétlődik.</p>
+              </div>
+            </div>
+            <h3>Animáció minősége</h3>
+            <div class="segment" id="animQuality">
+              <button type="button" class="seg" data-value="high">Magas</button>
+              <button type="button" class="seg" data-value="low">Energiatakarékos</button>
+              <button type="button" class="seg" data-value="off">Kikapcsolva</button>
+            </div>
+          </section>
+
+          <section class="settings-pane" data-pane="download" hidden>
+            <h3>Mentés helye</h3>
+            <div class="folder-row">
+              <code id="downloadDir">…</code>
+              <button type="button" class="btn-list" id="chooseFolder">Tallózás…</button>
+              <button type="button" class="btn-list" id="openFolder">Megnyitás</button>
+            </div>
+            <h3>Kész fájlok</h3>
+            <div class="choice-cards" id="saveMode">
+              <button type="button" data-value="auto"><strong>Automatikus mentés</strong><small>A kész fájl a fenti mappába kerül, és megjelenik a Galériában.</small></button>
+              <button type="button" data-value="ask"><strong>Mindig rákérdez</strong><small>Minden letöltésnél „Mentés másként” ablak nyílik.</small></button>
+            </div>
+            <h3>Alapértelmezések</h3>
+            <div class="field-grid">
+              <label>Formátum
+                <select id="defaultFormat" class="select"><option value="mp4">MP4 · videó</option><option value="mp3">MP3 · hang</option></select>
+              </label>
+              <label>Felbontás
+                <select id="defaultQuality" class="select">
+                  <option value="2160">2160p · 4K</option><option value="1440">1440p · 2K</option><option value="1080">1080p · Full HD</option>
+                  <option value="720">720p · HD</option><option value="480">480p</option><option value="360">360p</option>
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <section class="settings-pane" data-pane="ai" hidden>
+            <h3>AI-hozzáférés (MCP szerver)</h3>
+            <p class="pane-hint">Claude és más MCP-képes AI-asszisztensek kereshetnek, letölthetnek, vághatnak, átalakíthatnak és törölhetnek fájlokat a Galériában.</p>
+            <div class="choice-cards three" id="mcpMode">
+              <button type="button" data-value="off"><strong>Kikapcsolva</strong><small>Az AI semmit sem érhet el.</small></button>
+              <button type="button" data-value="ask"><strong>Engedélyt kér</strong><small>Keresni szabadon, de letöltés, szerkesztés, törlés előtt itt jóvá kell hagynod.</small></button>
+              <button type="button" data-value="full"><strong>Teljes hozzáférés</strong><small>Minden művelet kérdés nélkül lefut.</small></button>
+            </div>
+            <h3>Csatlakoztatás</h3>
+            <div class="mcp-config">
+              <div class="mcp-config-head"><span>Claude Code (parancs)</span><button type="button" class="copy-btn" data-copy="mcpCodeCmd">Másolás</button></div>
+              <pre id="mcpCodeCmd"></pre>
+              <div class="mcp-config-head"><span>Claude Desktop · claude_desktop_config.json</span><button type="button" class="copy-btn" data-copy="mcpDesktopJson">Másolás</button></div>
+              <pre id="mcpDesktopJson"></pre>
+              <div class="mcp-config-head"><span>HTTP (Streamable HTTP + Bearer token)</span><button type="button" class="copy-btn" data-copy="mcpHttp">Másolás</button></div>
+              <pre id="mcpHttp"></pre>
+              <button type="button" class="btn-list" id="mcpResetToken">Új token (a régi érvénytelen lesz)</button>
+            </div>
+            <h3>Legutóbbi AI-műveletek</h3>
+            <ul class="mcp-log" id="mcpLog"><li class="muted">Még nem volt AI-művelet.</li></ul>
+          </section>
+
+          <section class="settings-pane" data-pane="about" hidden>
+            <div class="update-section">
+              <div>
+                <h3 id="versionTitle">Alkalmazásverzió <span class="version-chip" id="currentVersion"></span></h3>
+                <p id="updateStatus" role="status"></p>
+              </div>
+              <div class="update-actions">
+                <button class="btn-list" type="button" id="checkUpdate" hidden>Ellenőrzés</button>
+                <button class="btn-primary" type="button" id="installUpdate" hidden>Frissítés</button>
+              </div>
+              <progress id="updateProgress" max="100" value="0" aria-label="Frissítés letöltése" hidden></progress>
+              <details class="update-access" id="updateAccess" hidden>
+                <summary>Hozzáférés privát GitHub-tárolóhoz</summary>
+                <p>Adj meg egy finomhangolt GitHub-tokent a ytdownloader tárolóhoz, Contents olvasási jogosultsággal.</p>
+                <form id="updateAccessForm">
+                  <label for="updateToken">GitHub-token</label>
+                  <input id="updateToken" type="password" autocomplete="off" placeholder="github_pat_…">
+                  <button type="submit" class="btn-primary">Mentés</button>
+                  <button id="removeUpdateToken" type="button" class="btn-list" hidden>Törlés</button>
+                </form>
+                <p id="updateAccessStatus" role="status"></p>
+              </details>
+            </div>
+            <h3>Billentyűparancsok</h3>
+            <ul class="shortcut-list">
+              <li><kbd>Ctrl K</kbd> Kereső</li><li><kbd>Szóköz</kbd> Lejátszás / szünet</li>
+              <li><kbd>← →</kbd> 5 mp léptetés</li><li><kbd>C</kbd> Felirat be/ki</li>
+              <li><kbd>Ctrl A</kbd> Mind kijelölése (Galéria)</li><li><kbd>Delete</kbd> Kijelöltek törlése</li>
+            </ul>
+          </section>
         </div>
-        <progress id="updateProgress" max="100" value="0" aria-label="Frissítés letöltése" hidden></progress>
-        <details class="update-access" id="updateAccess" hidden>
-          <summary>Hozzáférés privát GitHub-tárolóhoz</summary>
-          <p>Adj meg egy finomhangolt GitHub-tokent a ytdownloader tárolóhoz, Contents olvasási jogosultsággal.</p>
-          <form id="updateAccessForm">
-            <label for="updateToken">GitHub-token</label>
-            <input id="updateToken" type="password" autocomplete="off" placeholder="github_pat_…">
-            <button type="submit" class="btn-primary">Mentés</button>
-            <button id="removeUpdateToken" type="button" class="btn-list" hidden>Törlés</button>
-          </form>
-          <p id="updateAccessStatus" role="status"></p>
-        </details>
-      </section>
+      </div>
     </dialog>
 
-    <!-- ===== Folyamatok panel (oldalt becsúszik) ===== -->
+    <!-- ===== Folyamatok panel ===== -->
     <div id="jobsOverlay" class="jobs-overlay" hidden></div>
     <aside id="jobsPanel" class="jobs-panel" role="dialog" aria-modal="true" aria-label="Letöltések" tabindex="-1" hidden>
       <div class="jobs-head">
@@ -118,12 +222,8 @@
         <input id="listFilter" type="search" placeholder="Keresés a listában…" aria-label="Keresés a listában">
         <select id="listSort" aria-label="Lista rendezése"><option value="newest">Legújabb elöl</option><option value="title">Cím szerint</option><option value="duration">Hossz szerint</option></select>
       </div>
-      <!-- tömeges műveletek sora -->
       <div id="listToolbar" class="list-toolbar" hidden>
-        <label class="list-checkall">
-          <input type="checkbox" id="listSelectAll">
-          <span>Mind</span>
-        </label>
+        <label class="list-checkall"><input type="checkbox" id="listSelectAll"><span>Mind</span></label>
         <span id="listSelCount" class="list-sel-count">0 kijelölve</span>
         <div class="list-tool-actions">
           <button id="listRemoveSel" class="list-tool-btn" title="Kijelöltek eltávolítása">
@@ -169,6 +269,7 @@
           </form>
           <div class="hero-foot">
             <span id="sourceHint"></span>
+            <button type="button" class="clip-chip" id="clipChip" hidden></button>
             <kbd class="search-key" title="Ugrás a keresőre">Ctrl K</kbd>
           </div>
           <div id="status" class="status" role="status" hidden></div>
@@ -193,73 +294,111 @@
         </section>
       </div>
 
-      <!-- keresési találatok rács -->
+      <!-- keresési találatok / csatorna -->
       <section class="results" id="results" hidden>
         <section class="channel-profile" id="channelProfile" aria-labelledby="channelName" hidden>
-          <button class="back-link channel-back" id="channelBack" type="button">← Vissza</button>
-          <div class="channel-shell">
-            <div class="channel-banner"><img id="channelBanner" alt="" hidden></div>
-            <div class="channel-identity">
-              <div class="channel-avatar"><span id="channelInitial"></span><img id="channelAvatar" alt="" hidden></div>
-              <div class="channel-details">
-                <h1><span id="channelName"></span><span class="channel-verified" id="channelVerified" title="Hitelesített csatorna" aria-label="Hitelesített csatorna" hidden>✓</span></h1>
-                <p class="channel-meta" id="channelMeta" hidden></p>
-                <p class="channel-description" id="channelDescription" hidden></p>
+          <button class="channel-back" id="channelBack" type="button">← Vissza</button>
+          <div class="yt-channel-banner" id="channelBannerWrap" hidden><img id="channelBanner" alt=""></div>
+          <div class="yt-channel-head">
+            <div class="yt-channel-avatar"><span id="channelInitial"></span><img id="channelAvatar" alt="" hidden></div>
+            <div class="yt-channel-info">
+              <h1><span id="channelName"></span><svg class="verified-badge" id="channelVerified" viewBox="0 0 24 24" width="22" height="22" aria-label="Hitelesített csatorna" hidden><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1.6 14.6-4.2-4.2 1.4-1.4 2.8 2.8 6.4-6.4 1.4 1.4z"/></svg></h1>
+              <p class="yt-channel-meta" id="channelMeta"></p>
+              <button type="button" class="yt-channel-desc" id="channelDescription" hidden></button>
+              <div class="yt-channel-actions">
+                <button type="button" class="yt-sub-btn" id="channelSubscribe">Feliratkozás</button>
+                <button type="button" class="yt-pill" id="channelOpenWeb">Megnyitás a YouTube-on</button>
               </div>
             </div>
           </div>
+          <div class="yt-channel-tabs" id="channelTabs" role="tablist"></div>
           <p class="channel-status" id="channelStatus" role="status" hidden></p>
         </section>
-        <div class="results-head">
+        <div class="results-head" id="resultsHead">
           <span id="resultsTitle">Találatok</span>
         </div>
-        <!-- YouTube csatornák (kerek profilképes kártyák) — a videók fölött -->
-        <div class="yt-channels" id="ytChannels" hidden>
-          <div class="yt-channels-label">Csatornák</div>
-          <div class="yt-channels-row" id="ytChannelsRow"></div>
-        </div>
-        <div class="results-grid" id="resultsGrid"></div>
+        <div class="yt-channels" id="ytChannels" hidden></div>
+        <div class="results-grid yt-grid" id="resultsGrid"></div>
+        <div class="load-more" id="loadMore" hidden><span class="spinner"></span></div>
       </section>
     </main>
 
-    <!-- ===== Editor nézet (teljes képernyő) ===== -->
+    <!-- ===== Galéria ===== -->
+    <main id="gallery" class="gallery" hidden>
+      <header class="gallery-head">
+        <div>
+          <h1>Galéria</h1>
+          <p id="galleryMeta" class="gallery-meta"></p>
+        </div>
+        <div class="gallery-tools">
+          <input id="galleryFilter" type="search" placeholder="Keresés a letöltésekben…" aria-label="Keresés a galériában">
+          <div class="segment small" id="galleryKind">
+            <button type="button" class="seg active" data-kind="all">Összes</button>
+            <button type="button" class="seg" data-kind="video">Videók</button>
+            <button type="button" class="seg" data-kind="audio">Hang</button>
+          </div>
+          <select id="gallerySort" class="select small" aria-label="Rendezés">
+            <option value="new">Legújabb</option><option value="old">Legrégebbi</option>
+            <option value="name">Név</option><option value="size">Méret</option><option value="length">Hossz</option>
+          </select>
+          <button type="button" class="btn-list compact" id="galleryOpenFolder">Mappa</button>
+        </div>
+      </header>
+      <div class="gallery-grid" id="galleryGrid"></div>
+      <div class="gallery-empty" id="galleryEmpty" hidden>
+        <svg class="line-icon" viewBox="0 0 24 24" width="44" height="44" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="m3 16 5-5 4 4 3-3 6 6"/><circle cx="16" cy="9" r="1.6"/></svg>
+        <p>Még nincs letöltött fájl. Amit letöltesz, itt jelenik meg.</p>
+      </div>
+      <div class="selection-bar" id="selectionBar" hidden>
+        <span id="selectionCount">0 kijelölve</span>
+        <button type="button" class="sel-btn" id="selAll">Mind</button>
+        <button type="button" class="sel-btn" id="selReveal">Mappában</button>
+        <button type="button" class="sel-btn danger" id="selDelete">Törlés</button>
+        <button type="button" class="sel-btn" id="selClear">Mégse</button>
+      </div>
+    </main>
+
+    <!-- ===== Editor nézet ===== -->
     <div id="editor" class="editor" hidden>
-      <!-- Felső sáv -->
       <header class="ed-top">
         <button id="backBtn" class="icon-btn" title="Vissza">
-          <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M15 18l-6-6 6-6"/></svg>
+          <svg viewBox="0 0 24 24" width="20" height="20"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M15 18l-6-6 6-6"/></svg>
         </button>
         <div class="ed-url" id="edUrl"></div>
+        <button type="button" class="icon-btn" id="copyLinkBtn" title="Link másolása">
+          <svg class="line-icon" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>
+        </button>
       </header>
 
-      <!-- Fő terület: bal=lejátszó, jobb=beállítások -->
       <div class="ed-main">
         <section class="ed-player">
           <div class="stage" id="stage">
             <img id="previewPoster" class="preview-poster" alt="" hidden>
             <video id="igVideo" playsinline hidden></video>
+            <div class="sub-overlay" id="subOverlay" aria-live="off"></div>
             <div class="stage-skeleton" id="stageSkeleton"></div>
             <div id="previewNotice" class="preview-notice" role="status"></div>
-          </div>
-          <div class="player-meta">
-            <h1 id="title" class="title-skeleton"></h1>
-            <p id="uploader"></p>
           </div>
           <section class="ed-timeline" id="edTimeline">
             <div class="tl-controls">
               <button id="playBtn" class="icon-btn play-btn" title="Lejátszás vagy szünet (Szóköz)">
-                <svg id="playIcon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-                  <path id="playPath" fill="currentColor" d="M8 5v14l11-7z"/>
-                </svg>
+                <svg id="playIcon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path id="playPath" fill="currentColor" d="M8 5v14l11-7z"/></svg>
               </button>
               <span id="curTime" class="tl-time">0:00</span>
               <span class="tl-time-sep">/</span>
               <span id="totTime" class="tl-time muted">0:00</span>
               <div class="preview-audio">
-                <button id="muteBtn" class="preview-control" type="button" aria-label="Előnézet némítása" aria-pressed="false">Hang be</button>
+                <button id="muteBtn" class="preview-control icon" type="button" aria-label="Előnézet némítása" aria-pressed="false" title="Némítás">
+                  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M4 9h4l5-4v14l-5-4H4z"/><path class="vol-wave" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M16 9a4 4 0 0 1 0 6m2.5-8.5a7.5 7.5 0 0 1 0 11"/></svg>
+                </button>
                 <input id="previewVolume" type="range" min="0" max="100" value="100" aria-label="Előnézet hangereje">
+                <button id="ccBtn" class="preview-control icon cc" type="button" title="Feliratok (C)" aria-pressed="false" hidden>CC</button>
+                <button id="playerMenuBtn" class="preview-control icon" type="button" title="Lejátszó beállításai" aria-haspopup="menu">
+                  <svg class="line-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2.5 12h3M18.5 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
+                </button>
                 <button id="previewRetry" class="preview-control" type="button" hidden>Újratöltés</button>
               </div>
+              <div class="player-menu" id="playerMenu" role="menu" hidden></div>
             </div>
 
             <div class="timeline" id="timeline">
@@ -267,70 +406,95 @@
               <div class="tl-dim tl-dim-left" id="dimLeft"></div>
               <div class="tl-dim tl-dim-right" id="dimRight"></div>
               <div class="tl-window" id="tlWindow">
-                <div class="tl-handle tl-handle-l" id="handleL" role="slider" tabindex="0" aria-label="Vágás kezdete" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
-                  <span></span>
-                </div>
-                <div class="tl-handle tl-handle-r" id="handleR" role="slider" tabindex="0" aria-label="Vágás vége" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
-                  <span></span>
-                </div>
+                <div class="tl-handle tl-handle-l" id="handleL" role="slider" tabindex="0" aria-label="Vágás kezdete" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><span></span></div>
+                <div class="tl-handle tl-handle-r" id="handleR" role="slider" tabindex="0" aria-label="Vágás vége" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><span></span></div>
               </div>
               <div class="trim-timestamps" aria-hidden="true">
                 <span class="tl-bubble tl-bubble-start" id="bubbleL">0:00,00</span>
                 <span class="tl-bubble tl-bubble-end" id="bubbleR">0:00,00</span>
               </div>
-              <div class="playhead" id="playhead">
-                <div class="ph-bubble" id="phBubble">0:00</div>
-              </div>
+              <div class="playhead" id="playhead"><div class="ph-bubble" id="phBubble">0:00</div></div>
             </div>
-            <p class="tl-hint">A vágáshoz húzd a kijelölés két szélét.</p>
+            <p class="tl-hint">A vágáshoz húzd a kijelölés két szélét, vagy írd be az időpontokat jobbra.</p>
           </section>
+          <div class="player-meta">
+            <h1 id="title" class="title-skeleton"></h1>
+            <div class="player-channel">
+              <p id="uploader"></p>
+              <span id="videoStats" class="video-stats"></span>
+            </div>
+          </div>
         </section>
 
         <aside class="ed-side" aria-labelledby="saveTitle">
-          <h2 id="saveTitle">Mentés <span class="editor-source" id="editorSource"></span></h2>
+          <h2 id="saveTitle">Letöltés <span class="editor-source" id="editorSource"></span></h2>
+
           <div class="side-block">
             <span class="block-label">Formátum</span>
-            <div class="segment" id="formatToggle">
-              <button class="seg active" data-format="mp4">MP4 · videó</button>
-              <button class="seg" data-format="mp3">MP3 · hang</button>
+            <div class="format-cards" id="formatToggle">
+              <button class="seg active" data-format="mp4" type="button">
+                <svg class="line-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m10 9.5 5 2.5-5 2.5z"/></svg>
+                <span><strong>Videó</strong><small>MP4</small></span>
+              </button>
+              <button class="seg" data-format="mp3" type="button">
+                <svg class="line-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M9 18V6l11-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></svg>
+                <span><strong>Csak hang</strong><small>MP3</small></span>
+              </button>
             </div>
           </div>
 
           <div class="side-block">
             <span class="block-label" id="qualityLabel">Felbontás</span>
-            <div class="select-wrap">
-              <select id="quality" class="select"></select>
+            <div class="quality-chips" id="qualityChips" role="radiogroup" aria-labelledby="qualityLabel"></div>
+            <select id="quality" class="select" hidden></select>
+          </div>
+
+          <div class="side-block" id="audioBlock" hidden>
+            <label class="block-label" for="audioSelect">Hangsáv nyelve</label>
+            <div class="select-wrap"><select id="audioSelect" class="select"></select></div>
+          </div>
+
+          <div class="side-block" id="subsBlock" hidden>
+            <label class="block-label" for="subsSelect">Felirat a fájlban</label>
+            <div class="select-wrap"><select id="subsSelect" class="select"></select></div>
+            <div class="segment small" id="subsMode" hidden>
+              <button class="seg active" data-mode="embed" type="button">Beágyazva</button>
+              <button class="seg" data-mode="srt" type="button">Külön .srt</button>
             </div>
           </div>
 
-          <div class="side-block grow" id="trimBlock">
-            <span class="block-label">Kijelölt rész</span>
-            <div class="range-readout">
-              <div class="ro"><small>Kezdet</small><b id="startTime">0:00</b></div>
-              <div class="ro"><small>Vége</small><b id="endTime">0:00</b></div>
+          <div class="side-block" id="trimBlock">
+            <div class="label-row">
+              <span class="block-label">Kijelölt rész</span>
+              <button type="button" class="link-btn" id="trimReset">Teljes videó</button>
+            </div>
+            <div class="range-inputs">
+              <label><small>Kezdet</small><input id="startInput" class="time-input" inputmode="decimal" spellcheck="false"></label>
+              <label><small>Vége</small><input id="endInput" class="time-input" inputmode="decimal" spellcheck="false"></label>
               <div class="ro accent"><small>Hossz</small><b id="selectedLen">0:00</b></div>
             </div>
+            <span id="startTime" hidden></span><span id="endTime" hidden></span>
           </div>
 
-          <div class="side-block">
+          <div class="side-block download-block">
             <div class="size-row">
               <span class="block-label">Becsült méret</span>
               <b id="estimateSize" class="size-val">—</b>
             </div>
-            <button id="downloadBtn" class="btn-download">
+            <button id="downloadBtn" class="btn-download" type="button">
               <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 16l-6-6h4V4h4v6h4zM4 18h16v2H4z"/></svg>
               <span class="dl-text">Letöltés</span>
             </button>
-            <!-- listához adás / lista-elem szerkesztés gombjai -->
-            <button id="addListBtn" class="btn-list">
-              <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M3 5h13v2H3V5zm0 4h13v2H3V9zm0 4h9v2H3v-2zm16-1.5L23 15l-1.4 1.4-2.6-2.6-2.6 2.6L15 15l4-4z"/></svg>
-              <span id="addListText">Listához adás</span>
-            </button>
-            <button id="removeListBtn" class="btn-list ghost" hidden>
-              <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M6 7h12l-1 13H7L6 7zm3-3h6l1 2H8l1-2z"/></svg>
-              <span>Kivétel a listából</span>
-            </button>
-            <!-- progress sáv -->
+            <div class="secondary-actions">
+              <button id="addListBtn" class="btn-list" type="button">
+                <svg viewBox="0 0 24 24" width="17" height="17"><path fill="currentColor" d="M3 5h13v2H3V5zm0 4h13v2H3V9zm0 4h9v2H3v-2zm16-1.5L23 15l-1.4 1.4-2.6-2.6-2.6 2.6L15 15l4-4z"/></svg>
+                <span id="addListText">Listához adás</span>
+              </button>
+              <button id="removeListBtn" class="btn-list ghost" type="button" hidden>
+                <svg viewBox="0 0 24 24" width="17" height="17"><path fill="currentColor" d="M6 7h12l-1 13H7L6 7zm3-3h6l1 2H8l1-2z"/></svg>
+                <span>Kivétel</span>
+              </button>
+            </div>
             <div id="progressBox" class="progress-box" hidden>
               <div class="progress-track"><div id="progressFill" class="progress-fill"></div></div>
               <div class="progress-label">
@@ -338,20 +502,80 @@
                 <span id="progressMeta" class="progress-meta"></span>
                 <span id="progressPct">0%</span>
               </div>
-              <button type="button" id="cancelBtn" class="btn-cancel">
-                <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M18.3 5.7L12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7l1.4-1.4L10.6 10.6 16.9 4.3z"/></svg>
-                Megszakítás
-              </button>
+              <button type="button" id="cancelBtn" class="btn-cancel">Megszakítás</button>
             </div>
           </div>
         </aside>
       </div>
+    </div>
 
+    <!-- Lejátszó (galéria) -->
+    <dialog class="viewer" id="viewer" aria-label="Lejátszó">
+      <div class="viewer-head">
+        <strong id="viewerTitle"></strong>
+        <div class="viewer-actions">
+          <button type="button" class="icon-btn" id="viewerReveal" title="Megjelenítés a mappában"><svg class="line-icon" viewBox="0 0 24 24" width="17" height="17"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+          <button type="button" class="icon-btn" id="viewerExternal" title="Megnyitás külső lejátszóban"><svg class="line-icon" viewBox="0 0 24 24" width="17" height="17"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></button>
+          <button type="button" class="icon-btn" id="viewerClose" title="Bezárás (Esc)">✕</button>
+        </div>
+      </div>
+      <div class="viewer-stage">
+        <button type="button" class="viewer-nav prev" id="viewerPrev" aria-label="Előző">‹</button>
+        <video id="viewerVideo" controls playsinline></video>
+        <img id="viewerArt" alt="" hidden>
+        <button type="button" class="viewer-nav next" id="viewerNext" aria-label="Következő">›</button>
+      </div>
+    </dialog>
+
+    <!-- Szerkesztés (galéria) -->
+    <dialog class="small-dialog" id="editDialog" aria-labelledby="editTitle">
+      <form method="dialog" id="editForm">
+        <h2 id="editTitle">Vágás és átalakítás</h2>
+        <p class="pane-hint" id="editName"></p>
+        <div class="field-grid">
+          <label>Kezdet <input class="time-input" id="editStart" placeholder="0:00"></label>
+          <label>Vége <input class="time-input" id="editEnd" placeholder="vége"></label>
+          <label>Felbontás
+            <select id="editHeight" class="select"><option value="0">Eredeti</option><option value="2160">2160p</option><option value="1440">1440p</option><option value="1080">1080p</option><option value="720">720p</option><option value="480">480p</option><option value="360">360p</option></select>
+          </label>
+          <label>Formátum
+            <select id="editFormat" class="select"><option value="mp4">MP4 · videó</option><option value="mp3">MP3 · hang</option></select>
+          </label>
+        </div>
+        <label class="check-row"><input type="checkbox" id="editReplace"> Az eredeti felülírása (az eredeti a Lomtárba kerül)</label>
+        <div class="dialog-actions">
+          <button type="button" class="btn-list" value="cancel" id="editCancel">Mégse</button>
+          <button type="submit" class="btn-primary" value="ok">Mentés</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Megerősítés -->
+    <dialog class="small-dialog" id="confirmDialog">
+      <form method="dialog">
+        <h2 id="confirmTitle"></h2>
+        <p class="pane-hint" id="confirmText"></p>
+        <div class="dialog-actions">
+          <button type="submit" class="btn-list" value="no">Mégse</button>
+          <button type="submit" class="btn-primary danger" value="yes" id="confirmYes">Törlés</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="context-menu" id="contextMenu" role="menu" hidden></div>
+    <div class="approvals" id="approvals" aria-live="polite"></div>
+    <div class="toasts" id="toasts" aria-live="polite"></div>
+    <div class="resize-edges" id="resizeEdges" hidden>
+      <i data-edge="top"></i><i data-edge="bottom"></i><i data-edge="left"></i><i data-edge="right"></i>
+      <i data-edge="topleft"></i><i data-edge="topright"></i><i data-edge="bottomleft"></i><i data-edge="bottomright"></i>
     </div>
 
     <script src="config.js"></script>
     <script src="preview-stream.js"></script>
+    <script src="background.js"></script>
     <script src="app.js"></script>
+    <script src="player.js"></script>
+    <script src="library.js"></script>
     <script src="settings.js"></script>
   </body>
 </html>

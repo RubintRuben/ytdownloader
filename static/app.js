@@ -43,7 +43,6 @@ const resultsEl = $("results");
 const resultsGrid = $("resultsGrid");
 const resultsTitle = $("resultsTitle");
 const ytChannels = $("ytChannels");
-const ytChannelsRow = $("ytChannelsRow");
 // folyamatok menü
 const jobsBtn = $("jobsBtn");
 const jobsBadge = $("jobsBadge");
@@ -128,8 +127,6 @@ let currentFormat = "mp4";
 let info = null;
 let isInstagram = false;       // az aktuálisan betöltött média Instagram-e
 let isYoutube = false;         // …vagy YouTube (a többi: univerzális 'other')
-let igPostsMode = false;       // az IG keresőben épp egy fiók reeljeit nézzük-e
-let ytSearchState = null;      // a YT végtelen görgetés állapota {query, shown, loading, done}
 let searchToken = 0;           // minden új keresés/tab-váltás növeli; az elavult válaszokat eldobjuk
 let duration = 0;
 let selStart = 0;
@@ -239,8 +236,7 @@ $("pasteLinkBtn").addEventListener("click", async () => {
 
 function setTab(tab) {
   if (tab === "other") tab = "any";
-  const wasInEditor = !editor.hidden;
-  if (wasInEditor) {
+  if (!editor.hidden || !$("gallery").hidden) {
     stopPreview();
     showView("landing");
   }
@@ -282,13 +278,15 @@ function setTab(tab) {
   // hogy a régi tab válasza NE jelenjen meg az új tabon
   searchToken++;
   searchController?.abort();
-  ytSearchState = null;
+  feed = null;
+  landing.classList.remove("searching");
   setLoading(false);
   hideStatus();
   resultsEl.hidden = true;
   resultsGrid.innerHTML = "";
-  if (ytChannels) { ytChannels.hidden = true; ytChannelsRow.innerHTML = ""; }
-  igPostsMode = false;
+  ytChannels.hidden = true;
+  ytChannels.replaceChildren();
+  resultsGrid.classList.remove("shorts-grid");
   urlInput.value = "";
   urlInput.focus();
 }
@@ -325,130 +323,308 @@ async function handleInput() {
   }
 }
 
-// --- YouTube keresés (találati boxok) --------------------------------------
+// --- YouTube keresés: a YouTube-oldalhoz hasonló rács (videók + Shorts-polc + csatornák) ---
+
+const ICON_VERIFIED = '<svg class="verified-badge" viewBox="0 0 24 24" width="14" height="14" aria-label="Hitelesített"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1.6 14.6-4.2-4.2 1.4-1.4 2.8 2.8 6.4-6.4 1.4 1.4z"/></svg>';
+const ICON_SHORTS = '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path fill="#ff0033" d="M17.8 9.6 16 8.6a4 4 0 0 0-1.5-7.2 4 4 0 0 0-2.4.6L6.2 5.5a4 4 0 0 0 .1 7l1.8 1a4 4 0 0 0 1.5 7.2c.8.1 1.6-.1 2.4-.6l5.9-3.5a4 4 0 0 0-.1-7z"/><path fill="#fff" d="m10 9 5 3-5 3z"/></svg>';
+const ICON_MORE = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 7a1.6 1.6 0 1 0 0-3.2A1.6 1.6 0 0 0 12 7zm0 6.6a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2zm0 6.6a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2z"/></svg>';
+
+function thumbUrl(url) {
+  return url ? `${API}/api/thumb?url=` + encodeURIComponent(url.startsWith("//") ? "https:" + url : url) : "";
+}
 
 function renderSkeletons(n, keepTitle) {
   resultsEl.hidden = false;
   if (!keepTitle) resultsTitle.textContent = "Keresés…";
-  resultsGrid.innerHTML = "";
+  resultsGrid.replaceChildren();
   for (let i = 0; i < n; i++) {
     const c = document.createElement("div");
-    c.className = "result-card skeleton";
-    c.innerHTML = `<div class="rc-thumb"></div><div class="sk-line a"></div><div class="sk-line b"></div>`;
+    c.className = "yt-card skeleton";
+    c.innerHTML = `<div class="yt-thumb"></div><div class="yt-meta"><span class="yt-avatar"></span><div class="yt-text"><div class="sk-line a"></div><div class="sk-line b"></div></div></div>`;
     resultsGrid.appendChild(c);
   }
 }
 
-const YT_SEARCH_FIRST = 18;
 let searchController = null;
+let feed = null;   // {kind:"search"|"channel", query, ref, tab, next, loading}
+
+function gridColumns() {
+  const columns = getComputedStyle(resultsGrid).gridTemplateColumns.split(" ").filter(Boolean).length;
+  return Math.max(1, columns || 3);
+}
 
 async function runSearch(query, source) {
   hideChannelProfile();
   channelReturnQuery = null;
-  source = source || "youtube";
-  const myToken = ++searchToken;   // ez a keresés azonosítója; ha közben tab-ot váltunk, elavul
+  const myToken = ++searchToken;
   searchController?.abort();
   searchController = new AbortController();
   const signal = searchController.signal;
-  igPostsMode = false;
   setLoading(true);
   hideStatus();
   renderSkeletons(12);
-  const channelTask = fetch(API + "/api/search/channels?q=" + encodeURIComponent(query), { signal })
-    .then(response => response.ok ? response.json() : {channels: []})
-    .then(data => data.channels || [])
-    .catch(() => []);
-  const showChannels = channels => {
-    if (myToken !== searchToken) return;
-    ytChannelsRow.replaceChildren(...channels.map(makeChannelCard));
-    ytChannels.hidden = !channels.length;
-  };
+  ytChannels.hidden = true;
+  ytChannels.replaceChildren();
+  feed = { kind: "search", query, next: null, loading: true, count: 0 };
+  landing.classList.add("searching");
   try {
-    const res = await fetch(`${API}/api/search?q=` + encodeURIComponent(query) +
-                            "&limit=" + YT_SEARCH_FIRST + "&source=youtube", { signal });
-    // ha közben tab-ot váltottak (vagy új keresés indult), ezt a választ eldobjuk
-    if (myToken !== searchToken) return;
+    const res = await fetch(`${API}/api/yt/search?q=` + encodeURIComponent(query), { signal });
     const data = await res.json();
     if (myToken !== searchToken) return;
     if (!res.ok) throw new Error(data.detail || "A keresés nem sikerült.");
-    const items = data.results || [];
-    if (!items.length) {
-      const channels = await channelTask;
-      if (myToken !== searchToken) return;
-      resultsGrid.replaceChildren();
-      showChannels(channels);
-      resultsEl.hidden = !channels.length;
-      if (!channels.length) showStatus("Nincs találat erre: " + query, "error");
+    resultsTitle.textContent = "";
+    $("resultsHead").hidden = true;
+    resultsGrid.replaceChildren();
+    showChannelRows(data.channels || []);
+    if (!data.videos?.length && !data.shorts?.length && !data.channels?.length) {
+      resultsEl.hidden = true;
+      showStatus("Nincs találat erre: " + query, "error");
       return;
     }
-    // YouTube videó-találatok + végtelen görgetés indítása
-    ytSearchState = { query, shown: items.length, loading: false, done: items.length < YT_SEARCH_FIRST };
-    resultsTitle.textContent = `Találatok: „${query}”`;
-    resultsGrid.className = "results-grid";
-    resultsGrid.innerHTML = "";
-    items.forEach((it, i) => resultsGrid.appendChild(makeVideoCard(it, i)));
+    appendFeed(data.videos || [], data.shorts || [], true);
+    feed.next = data.next;
     resultsEl.hidden = false;
-    channelTask.then(showChannels);
+    // a csatornasor külön (szűrt) kéréssel jön, ha a fő találatok között nem volt
+    if (!data.channels?.length) {
+      fetch(`${API}/api/yt/search?channels=true&q=` + encodeURIComponent(query), { signal })
+        .then(r => r.ok ? r.json() : null)
+        .then(more => {
+          if (myToken !== searchToken || !more) return;
+          const top = (more.channels || []).filter(c => c.title.toLocaleLowerCase("hu").includes(query.toLocaleLowerCase("hu").split(" ")[0]));
+          showChannelRows(top.slice(0, 1));
+        }).catch(() => {});
+    }
   } catch (e) {
-    if (myToken !== searchToken) return;   // elavult keresés hibája — némán elnyeljük
+    if (myToken !== searchToken || e.name === "AbortError") return;
     console.error("[Downloader] keresés hiba:", e);
     resultsEl.hidden = true;
     showStatus("Hiba a keresésnél: " + e.message, "error");
   } finally {
-    if (myToken === searchToken) setLoading(false);
+    if (myToken === searchToken) { setLoading(false); if (feed) feed.loading = false; }
   }
 }
 
-// --- videó-kártya (YouTube találat / IG reel) ---
-function makeVideoCard(it, i, igStyle) {
-  const card = document.createElement("button");
-  card.type = "button";
-  card.className = "result-card" + (igStyle ? " ig" : "");
-  card.style.animationDelay = (Math.min(i, 12) * 30) + "ms";
-  const dur = it.duration ? `<span class="rc-dur">${fmtTime(it.duration)}</span>` : "";
-  const thumb = it.thumbnail ? `${API}/api/thumb?url=` + encodeURIComponent(it.thumbnail) : "";
-  // a reel készítőjének profilképe (ha van) — kis kerek avatar az uploader előtt
-  const avatar = it.authorPic
-    ? `<img class="rc-avatar" src="${API}/api/thumb?url=${encodeURIComponent(it.authorPic)}" alt="" onerror="this.style.display='none'">`
-    : "";
+// Videók rácsba; a Shorts-polc az első sor után kerül be (mint a YouTube-on).
+function appendFeed(videos, shorts, first) {
+  const start = resultsGrid.querySelectorAll(".yt-card").length;
+  const cols = gridColumns();
+  let placedShorts = !shorts.length;
+  videos.forEach((video, index) => {
+    resultsGrid.appendChild(makeVideoCard(video, start + index));
+    if (!placedShorts && (first ? index + 1 === cols : index + 1 === Math.min(videos.length, cols * 2))) {
+      resultsGrid.appendChild(makeShortsShelf(shorts));
+      placedShorts = true;
+    }
+  });
+  if (!placedShorts) resultsGrid.appendChild(makeShortsShelf(shorts));
+  feed && (feed.count = start + videos.length);
+}
+
+function metaLine(item) {
+  return [item.views, item.published].filter(Boolean).join(" • ");
+}
+
+function makeVideoCard(it, i) {
+  const card = document.createElement("article");
+  card.className = "yt-card";
+  card.style.animationDelay = (Math.min(i % 24, 12) * 25) + "ms";
+  const badge = it.live ? '<span class="yt-badge live">ÉLŐ</span>'
+    : (it.length || it.duration) ? `<span class="yt-badge">${escapeHtml(it.length || fmtTime(it.duration))}</span>` : "";
+  const avatar = it.avatar ? `<img src="${thumbUrl(it.avatar)}" alt="" loading="lazy" onerror="this.remove()">` : "";
+  const initial = escapeHtml((it.uploader || "?").charAt(0).toUpperCase());
   card.innerHTML = `
-    <div class="rc-thumb">
-      ${thumb ? `<img src="${thumb}" alt="" loading="lazy" onerror="this.style.display='none'" />` : ""}
-      ${dur}
-      <div class="rc-play"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M8 5v14l11-7z"/></svg></div>
-    </div>
-    <div class="rc-body">
-      <div class="rc-title">${escapeHtml(it.title)}</div>
-      <div class="rc-uploader">${avatar}<span>${escapeHtml(it.uploader || "")}</span></div>
+    <button type="button" class="yt-thumb" aria-label="${escapeHtml(it.title)} megnyitása">
+      ${it.thumbnail ? `<img src="${thumbUrl(it.thumbnail)}" alt="" loading="lazy" onerror="this.style.opacity=0">` : ""}
+      ${badge}
+      <span class="yt-quick" title="Gyors letöltés (MP4)" data-quick="mp4">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 16l-6-6h4V4h4v6h4zM4 18h16v2H4z"/></svg>
+      </span>
+    </button>
+    <div class="yt-meta">
+      <button type="button" class="yt-avatar" title="${escapeHtml(it.uploader || "")}" ${it.channelId ? "" : "disabled"}><span>${initial}</span>${avatar}</button>
+      <div class="yt-text">
+        <h3 class="yt-title" title="${escapeHtml(it.title)}">${escapeHtml(it.title)}</h3>
+        ${it.uploader ? `<button type="button" class="yt-channel" ${it.channelId ? "" : "disabled"}>${escapeHtml(it.uploader)}${it.verified ? ICON_VERIFIED : ""}</button>` : ""}
+        <div class="yt-stats">${escapeHtml(metaLine(it))}</div>
+      </div>
+      <button type="button" class="yt-more" aria-label="További műveletek">${ICON_MORE}</button>
     </div>`;
-  card.addEventListener("click", () => loadFromUrl(it.url));
+  card.querySelector(".yt-thumb").addEventListener("click", (event) => {
+    if (event.target.closest("[data-quick]")) { event.stopPropagation(); quickDownload(it, "mp4"); return; }
+    loadFromUrl(it.url);
+  });
+  card.querySelector(".yt-title").addEventListener("click", () => loadFromUrl(it.url));
+  const openChannel = () => it.channelId && openYtChannel(it.channelId, it.uploader, { thumbnail: it.avatar, verified: it.verified });
+  card.querySelector(".yt-avatar").addEventListener("click", openChannel);
+  card.querySelector(".yt-channel")?.addEventListener("click", openChannel);
+  card.querySelector(".yt-more").addEventListener("click", (event) => openCardMenu(event.currentTarget, it));
   return card;
 }
 
-// (Az IG ember-kereső kártyák megszűntek — az Instagram fülön már csak link-beillesztés van.)
+function makeShortsShelf(shorts) {
+  const shelf = document.createElement("section");
+  shelf.className = "shorts-shelf";
+  shelf.innerHTML = `<h2>${ICON_SHORTS}<span>Shorts</span></h2><div class="shorts-row"></div>`;
+  const row = shelf.querySelector(".shorts-row");
+  shorts.forEach((item, index) => row.appendChild(makeShortCard(item, index)));
+  if (shorts.length > 5) {
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "shorts-toggle";
+    toggle.textContent = "Több megjelenítése";
+    toggle.addEventListener("click", () => {
+      const open = shelf.classList.toggle("expanded");
+      toggle.textContent = open ? "Kevesebb megjelenítése" : "Több megjelenítése";
+    });
+    shelf.appendChild(toggle);
+  }
+  return shelf;
+}
+
+function makeShortCard(it, i) {
+  const card = document.createElement("article");
+  card.className = "short-card";
+  card.style.animationDelay = (Math.min(i, 10) * 30) + "ms";
+  card.innerHTML = `
+    <button type="button" class="short-thumb" aria-label="${escapeHtml(it.title)} megnyitása">
+      <img src="${thumbUrl(it.thumbnail)}" alt="" loading="lazy" onerror="this.style.opacity=0">
+      <span class="yt-quick" title="Gyors letöltés (MP4)" data-quick="mp4"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 16l-6-6h4V4h4v6h4zM4 18h16v2H4z"/></svg></span>
+    </button>
+    <div class="short-meta">
+      <div><h3 title="${escapeHtml(it.title)}">${escapeHtml(it.title)}</h3><span>${escapeHtml(it.views || "")}</span></div>
+      <button type="button" class="yt-more" aria-label="További műveletek">${ICON_MORE}</button>
+    </div>`;
+  card.querySelector(".short-thumb").addEventListener("click", (event) => {
+    if (event.target.closest("[data-quick]")) { event.stopPropagation(); quickDownload(it, "mp4"); return; }
+    loadFromUrl(it.url);
+  });
+  card.querySelector("h3").addEventListener("click", () => loadFromUrl(it.url));
+  card.querySelector(".yt-more").addEventListener("click", (event) => openCardMenu(event.currentTarget, it));
+  return card;
+}
+
+function showChannelRows(channels) {
+  ytChannels.replaceChildren(...channels.slice(0, 2).map(makeChannelRow));
+  ytChannels.hidden = !ytChannels.children.length;
+}
+
+function makeChannelRow(c) {
+  const row = document.createElement("article");
+  row.className = "yt-channel-row";
+  const pic = c.thumbnail ? `<img src="${thumbUrl(c.thumbnail)}" alt="" loading="lazy" onerror="this.remove()">` : "";
+  row.innerHTML = `
+    <button type="button" class="ycr-avatar"><span>${escapeHtml((c.title || "?").charAt(0).toUpperCase())}</span>${pic}</button>
+    <div class="ycr-info">
+      <h3>${escapeHtml(c.title)}${c.verified ? ICON_VERIFIED : ""}</h3>
+      <p>${escapeHtml([c.handle, c.subs].filter(Boolean).join(" • "))}</p>
+      ${c.description ? `<p class="ycr-desc">${escapeHtml(c.description)}</p>` : ""}
+    </div>
+    <button type="button" class="yt-sub-btn">Csatorna</button>`;
+  const open = () => openYtChannel(c.id, c.title, c);
+  row.querySelector(".ycr-avatar").addEventListener("click", open);
+  row.querySelector("h3").addEventListener("click", open);
+  row.querySelector(".yt-sub-btn").addEventListener("click", open);
+  return row;
+}
+
+// --- kártya-menü (⋮) és gyorsműveletek ---
+function openCardMenu(anchor, it) {
+  showContextMenu(anchor, [
+    { label: "Megnyitás a szerkesztőben", action: () => loadFromUrl(it.url) },
+    { label: "Letöltés MP4 (videó)", action: () => quickDownload(it, "mp4") },
+    { label: "Letöltés MP3 (hang)", action: () => quickDownload(it, "mp3") },
+    { label: "Listához adás", action: () => addRawToList(it) },
+    it.channelId && { label: "Csatorna megnyitása", action: () => openYtChannel(it.channelId, it.uploader, { thumbnail: it.avatar }) },
+    { label: "Link másolása", action: () => copyText(it.url, "Link másolva.") },
+  ].filter(Boolean));
+}
+
+async function quickDownload(it, format) {
+  const settings = window.appSettings || {};
+  const params = new URLSearchParams({ url: it.url, format, source: "youtube" });
+  if (format === "mp4") params.set("quality", settings.default_quality || "1080");
+  else params.set("quality", "192");
+  try {
+    await prepareJob(params);
+    startJobPolling();
+    toast(`Letöltés elindult: ${it.title}`, [{ label: "Letöltések", action: openJobs }]);
+  } catch (error) {
+    toast(error.message, [], "error");
+  }
+}
+
+function addRawToList(it) {
+  const settings = window.appSettings || {};
+  downloadList.unshift({
+    id: "li_" + Math.random().toString(36).slice(2, 10), url: it.url, source: "youtube",
+    title: it.title || "videó", thumbnail: it.thumbnail || "", format: settings.default_format || "mp4",
+    quality: settings.default_format === "mp3" ? "192" : (settings.default_quality || "1080"),
+    start: 0, end: it.duration || 0, duration: it.duration || 0, estBytes: 0,
+  });
+  persistList();
+  fillEstimate(downloadList[0]);
+  toast("Hozzáadva a listához.", [{ label: "Lista", action: openList }]);
+}
+
+async function copyText(text, message) {
+  try { await navigator.clipboard.writeText(text); toast(message || "Másolva."); }
+  catch { toast("Nem sikerült a vágólapra másolni.", [], "error"); }
+}
+
+function showContextMenu(anchor, items) {
+  const menu = $("contextMenu");
+  menu.replaceChildren(...items.map(item => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.role = "menuitem";
+    button.textContent = item.label;
+    if (item.danger) button.classList.add("danger");
+    button.addEventListener("click", () => { hideContextMenu(); item.action(); });
+    return button;
+  }));
+  menu.hidden = false;
+  const rect = anchor.getBoundingClientRect();
+  const width = menu.offsetWidth, height = menu.offsetHeight;
+  const left = Math.min(window.innerWidth - width - 8, Math.max(8, rect.right - width));
+  const top = rect.bottom + height + 8 > window.innerHeight ? rect.top - height - 4 : rect.bottom + 4;
+  menu.style.left = left + "px";
+  menu.style.top = Math.max(8, top) + "px";
+  menu.querySelector("button")?.focus({ preventScroll: true });
+}
+function hideContextMenu() { $("contextMenu").hidden = true; }
+document.addEventListener("pointerdown", (event) => {
+  if (!event.target.closest("#contextMenu, .yt-more, .g-more")) hideContextMenu();
+}, true);
+window.addEventListener("blur", hideContextMenu);
+
+// --- toast értesítések ---
+function toast(message, actions = [], type = "") {
+  const box = document.createElement("div");
+  box.className = "toast " + type;
+  const text = document.createElement("span");
+  text.textContent = message;
+  box.appendChild(text);
+  for (const action of actions) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = action.label;
+    button.addEventListener("click", () => { action.action(); box.remove(); });
+    box.appendChild(button);
+  }
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "toast-x";
+  close.setAttribute("aria-label", "Bezárás");
+  close.textContent = "✕";
+  close.addEventListener("click", () => box.remove());
+  box.appendChild(close);
+  $("toasts").appendChild(box);
+  setTimeout(() => box.classList.add("leaving"), actions.length ? 7000 : 3800);
+  setTimeout(() => box.remove(), actions.length ? 7400 : 4200);
+}
 
 const channelCountFormat = new Intl.NumberFormat("hu-HU", { notation: "compact", maximumFractionDigits: 1 });
-
-function fmtFollowers(count) {
-  return channelCountFormat.format(count);
-}
-
-// --- csatorna-kártya (YouTube csatorna-keresés, kerek profilkép) ---
-function makeChannelCard(c, i) {
-  const card = document.createElement("button");
-  card.type = "button";
-  card.className = "channel-card";
-  card.style.animationDelay = (Math.min(i, 8) * 30) + "ms";
-  const pic = c.thumbnail ? `${API}/api/thumb?url=` + encodeURIComponent(c.thumbnail) : "";
-  const initial = escapeHtml((c.title || "?").charAt(0).toUpperCase());
-  const subs = c.followers ? `<div class="cc-subs">${fmtFollowers(c.followers)} feliratkozó</div>` : "";
-  card.innerHTML = `
-    <div class="cc-pic"><span class="cc-initial">${initial}</span>${pic ? `<img src="${pic}" alt="" loading="lazy" onerror="this.style.display='none'">` : ""}</div>
-    <div class="cc-name">${escapeHtml(c.title)}</div>
-    ${subs}`;
-  card.addEventListener("click", () => openYtChannel(c.id, c.title, c));
-  return card;
-}
+function fmtFollowers(count) { return channelCountFormat.format(count); }
 
 function youtubeChannelRef(value) {
   if (/^UC[A-Za-z0-9_-]{22}$/.test(value) || /^@[\p{L}\p{N}_.-]{2,100}$/u.test(value)) return value;
@@ -464,30 +640,48 @@ function youtubeChannelRef(value) {
 function hideChannelProfile() {
   channelProfile.hidden = true;
   landing.classList.remove("channel-mode");
+  $("resultsHead").hidden = false;
 }
 
 function channelPicture(node, url) {
   node.hidden = !url;
   if (!url) { node.removeAttribute("src"); return; }
   node.onerror = () => { node.hidden = true; };
-  node.src = API + "/api/thumb?url=" + encodeURIComponent(url.startsWith("//") ? "https:" + url : url);
+  node.src = thumbUrl(url);
 }
 
+let currentChannel = null;
 function renderChannelProfile(channel) {
+  currentChannel = channel;
   const title = channel.title || "YouTube-csatorna";
   $("channelName").textContent = title;
   $("channelInitial").textContent = title[0].toUpperCase();
   $("channelVerified").hidden = !channel.verified;
-  const details = [channel.handle];
-  if (typeof channel.followers === "number") details.push(fmtFollowers(channel.followers) + " feliratkozó");
-  const meta = $("channelMeta");
-  meta.textContent = details.filter(Boolean).join(" · ");
-  meta.hidden = !meta.textContent;
+  const stats = channel.stats || (typeof channel.followers === "number" ? [fmtFollowers(channel.followers) + " feliratkozó"] : []);
+  $("channelMeta").innerHTML = [channel.handle ? `<strong>${escapeHtml(channel.handle)}</strong>` : "", ...stats.map(escapeHtml)]
+    .filter(Boolean).join(" • ");
   const description = $("channelDescription");
-  description.textContent = channel.description || "";
-  description.hidden = !description.textContent;
+  const text = (channel.description || "").trim();
+  description.hidden = !text;
+  description.classList.remove("expanded");
+  description.innerHTML = escapeHtml(text) + '<span class="more">…stb.</span>';
   channelPicture($("channelBanner"), channel.banner);
+  $("channelBannerWrap").hidden = !channel.banner;
   channelPicture($("channelAvatar"), channel.thumbnail);
+}
+
+$("channelDescription").addEventListener("click", (event) => event.currentTarget.classList.toggle("expanded"));
+$("channelSubscribe").addEventListener("click", () => {
+  if (currentChannel?.id) openExternal(`https://www.youtube.com/channel/${currentChannel.id}?sub_confirmation=1`);
+});
+$("channelOpenWeb").addEventListener("click", () => {
+  if (currentChannel?.id) openExternal(`https://www.youtube.com/channel/${currentChannel.id}`);
+});
+
+function openExternal(url) {
+  const native = window.pywebview?.api;
+  if (native?.open_url) native.open_url(url);
+  else window.open(url, "_blank", "noopener");
 }
 
 $("channelBack").addEventListener("click", () => {
@@ -498,90 +692,109 @@ $("channelBack").addEventListener("click", () => {
   } else setTab("youtube");
 });
 
+const CHANNEL_TAB_NAMES = { videos: "Videók", shorts: "Shorts", streams: "Élő" };
+
+function renderChannelTabs(tabs, active) {
+  const holder = $("channelTabs");
+  holder.replaceChildren(...tabs.map(tab => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.role = "tab";
+    button.textContent = CHANNEL_TAB_NAMES[tab] || tab;
+    button.setAttribute("aria-selected", String(tab === active));
+    button.addEventListener("click", () => {
+      if (tab !== active && currentChannel) loadChannelTab(currentChannel.id, tab);
+    });
+    return button;
+  }));
+}
+
 async function openYtChannel(channelId, title, placeholder = {}) {
   if (currentTab !== "youtube") setTab("youtube");
-  if (!editor.hidden) { stopPreview(); showView("landing"); }
-  channelReturnQuery = ytSearchState?.query || channelReturnQuery;
-  ytSearchState = null;
+  if (!editor.hidden || !$("gallery").hidden) { stopPreview(); showView("landing"); }
+  channelReturnQuery = (feed?.kind === "search" ? feed.query : null) || channelReturnQuery;
+  hideStatus();
+  landing.classList.add("channel-mode");
+  channelProfile.hidden = false;
+  $("resultsHead").hidden = true;
+  ytChannels.hidden = true;
+  renderChannelProfile({ ...placeholder, id: channelId, title: title || placeholder.title });
+  renderChannelTabs(["videos", "shorts"], "videos");
+  landing.scrollTop = 0;
+  await loadChannelTab(channelId, "videos", placeholder);
+}
+
+async function loadChannelTab(channelId, tab, placeholder = {}) {
   const myToken = ++searchToken;
   searchController?.abort();
   searchController = new AbortController();
-  const signal = searchController.signal;
   const notice = $("channelStatus");
-  hideStatus();
   notice.hidden = true;
-  landing.classList.add("channel-mode");
-  channelProfile.hidden = false;
-  renderChannelProfile({ ...placeholder, title });
   resultsEl.hidden = false;
-  ytChannels.hidden = true;
-  resultsGrid.className = "results-grid";
   renderSkeletons(8, true);
-  resultsTitle.textContent = "Videók";
-  landing.scrollTop = 0;
+  resultsGrid.classList.toggle("shorts-grid", tab === "shorts");
+  feed = { kind: "channel", ref: channelId, tab, next: null, loading: true };
   try {
-    const res = await fetch(API + "/api/yt/channel?channel_id=" + encodeURIComponent(channelId), { signal });
+    const res = await fetch(`${API}/api/yt/channel?channel_id=${encodeURIComponent(channelId)}&tab=${tab}`,
+      { signal: searchController.signal });
     const data = await res.json();
     if (myToken !== searchToken) return;
     if (!res.ok) throw new Error(data.detail || "A csatorna most nem érhető el.");
     const channel = data.channel || {};
-    renderChannelProfile({
-      ...placeholder, ...channel, title: channel.title || title,
-      thumbnail: channel.thumbnail || placeholder.thumbnail,
-      followers: channel.followers ?? placeholder.followers,
-    });
-    resultsGrid.replaceChildren(...(data.videos || []).map((video, index) => makeVideoCard(video, index)));
-    if (!data.videos?.length) {
-      notice.textContent = "A csatornán nincs elérhető videó.";
+    renderChannelProfile({ ...placeholder, ...currentChannel, ...channel,
+      thumbnail: channel.thumbnail || placeholder.thumbnail || currentChannel?.thumbnail });
+    feed.ref = channel.id || channelId;
+    renderChannelTabs(data.tabs || ["videos"], tab);
+    resultsGrid.replaceChildren(...renderChannelItems(data.items || [], tab, 0));
+    feed.next = data.next;
+    if (!data.items?.length) {
+      notice.textContent = tab === "shorts" ? "Ezen a csatornán nincs Shorts-videó." : "A csatornán nincs elérhető videó.";
       notice.hidden = false;
     }
   } catch (error) {
-    if (myToken !== searchToken) return;
+    if (myToken !== searchToken || error.name === "AbortError") return;
     resultsGrid.replaceChildren();
     notice.textContent = error.message;
     notice.hidden = false;
+  } finally {
+    if (myToken === searchToken && feed) feed.loading = false;
   }
 }
 
-// (Az IG fiók-reel böngészés megszűnt — az Instagram fülön link-beillesztés van.)
+function renderChannelItems(items, tab, offset) {
+  return items.map((item, index) => tab === "shorts" ? makeShortCard(item, offset + index) : makeVideoCard(item, offset + index));
+}
 
-// --- YouTube végtelen görgetés ---
-async function loadMoreYt() {
-  if (!ytSearchState || ytSearchState.loading || ytSearchState.done) return;
+// --- végtelen görgetés (keresés és csatorna) ---
+async function loadMoreFeed() {
+  if (!feed || feed.loading || !feed.next) return;
   const myToken = searchToken;
-  ytSearchState.loading = true;
-  const next = ytSearchState.shown + 24;   // egyszerre sok továbbit töltünk (mint az igazi YT)
+  const current = feed;
+  current.loading = true;
+  $("loadMore").hidden = false;
   try {
-    const res = await fetch(`${API}/api/search?q=` + encodeURIComponent(ytSearchState.query) +
-                            "&limit=" + next + "&source=youtube");
+    const url = current.kind === "search"
+      ? `${API}/api/yt/search?page=${encodeURIComponent(current.next)}&q=${encodeURIComponent(current.query)}`
+      : `${API}/api/yt/channel?channel_id=${encodeURIComponent(current.ref)}&tab=${current.tab}&page=${encodeURIComponent(current.next)}`;
+    const res = await fetch(url);
     const data = await res.json();
-    if (myToken !== searchToken || !ytSearchState) return;   // tab-váltás közben — eldobjuk
-    const items = data.results || [];
-    if (items.length <= ytSearchState.shown) { ytSearchState.done = true; return; }
-    for (let i = ytSearchState.shown; i < items.length; i++) {
-      resultsGrid.appendChild(makeVideoCard(items[i], i));
-    }
-    if (items.length < next) ytSearchState.done = true;
-    ytSearchState.shown = items.length;
-  } catch { /* csendben */ } finally {
-    if (ytSearchState) ytSearchState.loading = false;
+    if (myToken !== searchToken || feed !== current) return;
+    if (current.kind === "search") appendFeed(data.videos || [], data.shorts || [], false);
+    else resultsGrid.append(...renderChannelItems(data.items || [], current.tab, resultsGrid.children.length));
+    current.next = data.next;
+  } catch { /* a következő görgetés újrapróbálja */ } finally {
+    current.loading = false;
+    $("loadMore").hidden = true;
   }
 }
 
-// görgetésre töltsünk be többet (a landing görgethető)
 landing.addEventListener("scroll", () => {
-  if (currentTab !== "youtube" || igPostsMode || resultsEl.hidden) return;
-  const nearBottom = landing.scrollTop + landing.clientHeight >= landing.scrollHeight - 600;
-  if (nearBottom) loadMoreYt();
-});
+  if (resultsEl.hidden || !feed?.next) return;
+  if (landing.scrollTop + landing.clientHeight >= landing.scrollHeight - 900) loadMoreFeed();
+}, { passive: true });
 
 function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) =>
+  return String(s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
@@ -623,9 +836,12 @@ async function loadFromUrl(url, keepListEdit) {
 }
 
 function showView(which) {
-  const showEditor = which === "editor";
-  landing.hidden = showEditor;
-  editor.hidden = !showEditor;
+  landing.hidden = which !== "landing";
+  editor.hidden = which !== "editor";
+  $("gallery").hidden = which !== "gallery";
+  $("galleryBtn").classList.toggle("active-view", which === "gallery");
+  document.body.dataset.view = which;
+  if (which !== "editor") window.playerHooks?.reset?.();
 }
 
 function openEditor(url) {
@@ -658,10 +874,22 @@ function openEditor(url) {
   }
   totTimeEl.textContent = fmtTime(duration);
   curTimeEl.textContent = "0:00";
+  const stats = [];
+  if (typeof info.views === "number") stats.push(new Intl.NumberFormat("hu-HU").format(info.views) + " megtekintés");
+  if (/^\d{8}$/.test(info.uploadDate || "")) {
+    const d = info.uploadDate;
+    stats.push(new Date(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8)).toLocaleDateString("hu-HU", { year: "numeric", month: "long", day: "numeric" }));
+  }
+  $("videoStats").textContent = stats.join(" • ");
 
+  const defaults = window.appSettings || {};
+  if (!editingListId) setFormat(defaults.default_format === "mp3" ? "mp3" : "mp4", false);
+  audioLang = "";
+  setupMediaOptions();
   updateQuality();
   refreshEstimate();
   updateEditorListButtons();
+  window.playerHooks?.load(info);
 
   // a filmstrip: YouTube-nál storyboard-kockák, máshol üres (a sima csík marad)
   buildFilmstrip();
@@ -716,7 +944,7 @@ function stopPreview() {
   igVideo.load();
 }
 
-function setupDirectPlayer(refresh = false) {
+function setupDirectPlayer(refresh = false, startAt = 0, autoplay = false) {
   stopPreview();
   const generation = previewGeneration;
   const controller = new AbortController();
@@ -746,6 +974,7 @@ function setupDirectPlayer(refresh = false) {
   pendingPreviewSeek = null;
   setNotice("Előnézet betöltése…");
   setPlayIcon(false);
+  previewWantPlay = autoplay;
 
   const fail = message => {
     if (!active()) return;
@@ -803,7 +1032,8 @@ function setupDirectPlayer(refresh = false) {
     const limit = duration > 0 ? duration - 0.15 : target;
     const start = Math.max(0, Math.min(target, limit));
     waitForMedia(11000);
-    attachPreviewStream(igVideo, API + info.streamUrl, start, duration, hasAudio, stream.signal)
+    const streamUrl = API + info.streamUrl + (audioLang ? "?audio=" + encodeURIComponent(audioLang) : "");
+    attachPreviewStream(igVideo, streamUrl, start, duration, hasAudio, stream.signal)
       .catch(() => { if (!stream.signal.aborted) switchSource(); });
   }
 
@@ -904,17 +1134,28 @@ function setupDirectPlayer(refresh = false) {
       } catch { /* The stored fallback URL can still be used. */ }
     }
     if (!active()) return;
-    if (info.directUrl) {
+    if (audioLang && canStream()) {
+      loadStream(startAt);
+    } else if (info.directUrl) {
       mode = "direct";
       igVideo.hidden = false;
+      if (startAt > 0) pendingPreviewSeek = startAt;
       igVideo.src = API + info.directUrl;
       waitForMedia(5000);
-    } else if (canStream()) loadStream();
+    } else if (canStream()) loadStream(startAt);
     else switchSource();
   }
 
   start();
-  renderPlayhead(0);
+  renderPlayhead(startAt);
+}
+
+// Hangsáv váltásakor az előnézet a választott nyelvvel, ugyanonnan folytatódik.
+function reloadPreviewAudio() {
+  if (!info || editor.hidden) return;
+  const at = pendingPreviewSeek ?? igVideo.currentTime ?? 0;
+  const playing = !igVideo.paused || previewWantPlay;
+  setupDirectPlayer(false, at, playing);
 }
 
 $("previewRetry").addEventListener("click", () => retryPreview?.());
@@ -1072,41 +1313,171 @@ playBtn.addEventListener("click", () => {
   }
 });
 
-// --- minőség ---------------------------------------------------------------
+// --- formátum, minőség, hangsáv, felirat ----------------------------------------
+
+let audioLang = "";               // kiválasztott hangsáv (üres = eredeti/alapértelmezett)
+const langNames = new Intl.DisplayNames(["hu"], { type: "language" });
+
+function languageName(code) {
+  const base = String(code || "").replace(/-orig$/, "");
+  try {
+    const name = langNames.of(base);
+    return name ? name.charAt(0).toUpperCase() + name.slice(1) : base;
+  } catch { return base; }
+}
+
+function qualityTag(h) {
+  return h >= 4320 ? "8K" : h >= 2160 ? "4K" : h >= 1440 ? "2K" : h >= 1080 ? "Full HD" : h >= 720 ? "HD" : "";
+}
 
 function updateQuality() {
+  const previous = qualitySelect.value;
   qualitySelect.innerHTML = "";
+  const chips = $("qualityChips");
+  chips.replaceChildren();
+  let values;
   if (currentFormat === "mp3") {
-    qualityLabel.textContent = "Bitráta";
-    for (const br of MP3_BITRATES) {
-      const o = document.createElement("option");
-      o.value = br; o.textContent = `${br} kbps`;
-      if (br === 192) o.selected = true;
-      qualitySelect.appendChild(o);
-    }
+    qualityLabel.textContent = "Hangminőség";
+    values = MP3_BITRATES.map(br => ({ value: String(br), main: `${br}`, sub: "kbps" }));
   } else {
     qualityLabel.textContent = "Felbontás";
     let r = (info && info.resolutions) || [];
     if (!r.length) r = [1080, 720, 480, 360];
-    for (const h of r) {
-      const o = document.createElement("option");
-      o.value = h;
-      const t = h >= 2160 ? " · 4K" : h >= 1440 ? " · 2K" : h >= 1080 ? " · FHD" : "";
-      o.textContent = `${h}p${t}`;
-      qualitySelect.appendChild(o);
-    }
+    values = r.map(h => ({ value: String(h), main: `${h}p`, sub: qualityTag(h) }));
   }
+  const preferred = currentFormat === "mp3" ? "192" : String((window.appSettings || {}).default_quality || "1080");
+  let chosen = values.find(v => v.value === previous)?.value;
+  if (!chosen && currentFormat !== "mp3") {
+    chosen = (values.find(v => Number(v.value) <= Number(preferred)) || values.at(-1))?.value;
+  }
+  chosen = chosen || values.find(v => v.value === preferred)?.value || values[0]?.value;
+  for (const v of values) {
+    const o = document.createElement("option");
+    o.value = v.value; o.textContent = v.main;
+    qualitySelect.appendChild(o);
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "q-chip";
+    chip.role = "radio";
+    chip.dataset.value = v.value;
+    chip.innerHTML = `<strong>${escapeHtml(v.main)}</strong>${v.sub ? `<small>${escapeHtml(v.sub)}</small>` : ""}`;
+    chip.addEventListener("click", () => setQuality(v.value));
+    chips.appendChild(chip);
+  }
+  setQuality(chosen, false);
 }
+
+function setQuality(value, estimate = true) {
+  qualitySelect.value = value;
+  for (const chip of $("qualityChips").children) {
+    const on = chip.dataset.value === value;
+    chip.classList.toggle("active", on);
+    chip.setAttribute("aria-checked", String(on));
+  }
+  if (estimate) refreshEstimate();
+}
+
+function setFormat(format, estimate = true) {
+  currentFormat = format === "mp3" ? "mp3" : "mp4";
+  formatToggle.querySelectorAll(".seg").forEach((x) => x.classList.toggle("active", x.dataset.format === currentFormat));
+  $("subsMode").hidden = currentFormat === "mp3" || !$("subsSelect").value;
+  if (estimate) { updateQuality(); refreshEstimate(); }
+}
+
 formatToggle.addEventListener("click", (e) => {
   const b = e.target.closest(".seg");
-  if (!b) return;
-  currentFormat = b.dataset.format;
-  formatToggle.querySelectorAll(".seg").forEach((x) => x.classList.remove("active"));
-  b.classList.add("active");
-  updateQuality();
-  refreshEstimate();
+  if (b) setFormat(b.dataset.format);
 });
 qualitySelect.addEventListener("change", refreshEstimate);
+
+function setupMediaOptions() {
+  // Hangsávok (szinkronok) — csak ha több nyelv van
+  const tracks = info?.audioTracks || [];
+  const audioSelect = $("audioSelect");
+  audioSelect.replaceChildren(...tracks.map(track => {
+    const option = document.createElement("option");
+    option.value = track.original ? "" : track.lang;
+    option.textContent = languageName(track.lang) + (track.original ? " (eredeti)" : "");
+    return option;
+  }));
+  $("audioBlock").hidden = tracks.length < 2;
+  audioSelect.value = audioLang;
+
+  // Feliratok: kézi feliratok + automatikus (eredeti nyelvű) + gépi fordítás
+  const subsSelect = $("subsSelect");
+  const options = [new Option("Nincs felirat", "")];
+  for (const sub of info?.subtitles || []) options.push(new Option(languageName(sub.lang), "m:" + sub.lang));
+  if (info?.captionsOrig) {
+    options.push(new Option(languageName(info.captionsOrig) + " (automatikus)", "a:" + info.captionsOrig));
+    const group = document.createElement("optgroup");
+    group.label = "Gépi fordítás";
+    const translated = (info.translate || []).filter(code => code !== info.captionsOrig)
+      .map(code => new Option(languageName(code), "a:" + code))
+      .sort((a, b) => a.text.localeCompare(b.text, "hu"));
+    group.append(...translated);
+    if (translated.length) options.push(group);
+  }
+  subsSelect.replaceChildren(...options);
+  $("subsBlock").hidden = options.length < 2;
+  $("subsMode").hidden = true;
+}
+
+function setAudioLang(lang, fromPlayer = false) {
+  if (lang === audioLang) return;
+  audioLang = lang || "";
+  $("audioSelect").value = audioLang;
+  refreshEstimate();
+  if (!fromPlayer) window.playerHooks?.audioChanged(audioLang);
+}
+
+$("audioSelect").addEventListener("change", (event) => setAudioLang(event.target.value));
+$("subsSelect").addEventListener("change", () => {
+  $("subsMode").hidden = currentFormat === "mp3" || !$("subsSelect").value;
+});
+$("subsMode").addEventListener("click", (event) => {
+  const button = event.target.closest(".seg");
+  if (!button) return;
+  for (const b of $("subsMode").children) b.classList.toggle("active", b === button);
+});
+
+function subtitleParams(params) {
+  const value = $("subsSelect").value;
+  if (!value || $("subsBlock").hidden) return;
+  params.set("subs", value.slice(2));
+  params.set("subs_auto", String(value.startsWith("a:")));
+  params.set("subs_mode", currentFormat === "mp3" ? "srt" : ($("subsMode").querySelector(".active")?.dataset.mode || "embed"));
+}
+
+// Kézzel beírható vágási időpontok (pl. 1:23, 1:23,5 vagy 83.5)
+function parseTimeInput(text) {
+  const clean = String(text).trim().replace(",", ".");
+  if (!clean) return NaN;
+  if (!/^\d+(?::\d{1,2}){0,2}(?:\.\d+)?$/.test(clean)) return NaN;
+  return clean.split(":").reduce((total, part) => total * 60 + Number(part), 0);
+}
+
+for (const [input, side] of [[$("startInput"), "l"], [$("endInput"), "r"]]) {
+  const apply = () => {
+    if (!(duration > 0)) return;
+    const value = parseTimeInput(input.value);
+    if (!Number.isFinite(value)) { layoutWindow(); return; }
+    const gap = Math.min(0.1, duration);
+    if (side === "l") selStart = Math.max(0, Math.min(selEnd - gap, value));
+    else selEnd = Math.min(duration, Math.max(selStart + gap, value));
+    layoutWindow();
+    refreshEstimate();
+    seekTo(side === "l" ? selStart : Math.max(selStart, selEnd - 2), true);
+  };
+  input.addEventListener("change", apply);
+  input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); apply(); input.blur(); } });
+}
+$("trimReset").addEventListener("click", () => {
+  if (!(duration > 0)) return;
+  selStart = 0;
+  selEnd = duration;
+  layoutWindow();
+  refreshEstimate();
+});
 
 // --- filmstrip (storyboard kockák) -----------------------------------------
 
@@ -1161,6 +1532,7 @@ function layoutWindow() {
   }
   if (!(duration > 0)) {
     startTimeEl.textContent = endTimeEl.textContent = selectedLenEl.textContent = totTimeEl.textContent = "—";
+    $("startInput").value = $("endInput").value = "";
     tlWindow.style.left = "0"; tlWindow.style.width = "100%";
     dimLeft.style.width = dimRight.style.width = "0";
     return;
@@ -1176,6 +1548,9 @@ function layoutWindow() {
   bubbleL.textContent = startTimeEl.textContent = fmtTrimTime(selStart);
   bubbleR.textContent = endTimeEl.textContent = fmtTrimTime(selEnd);
   selectedLenEl.textContent = fmtTrimTime(selEnd - selStart);
+  if (document.activeElement !== $("startInput")) $("startInput").value = fmtTrimTime(selStart);
+  if (document.activeElement !== $("endInput")) $("endInput").value = fmtTrimTime(selEnd);
+  $("trimReset").hidden = selStart < 0.01 && selEnd > duration - 0.01;
 
   const startLabel = placeTrimLabel(bubbleL, left, w);
   const endLabel = placeTrimLabel(bubbleR, right, w);
@@ -1310,19 +1685,20 @@ function scheduleEstimate() {
   clearTimeout(estTimer);
   estTimer = setTimeout(refreshEstimate, 250);
 }
+let estimateSeq = 0;
 async function refreshEstimate() {
   if (!info) return;
-  const u = urlInput.value.trim();
+  const seq = ++estimateSeq;
   const p = new URLSearchParams({
-    url: u, format: currentFormat, quality: qualitySelect.value, source: currentTab,
+    url: edUrl.textContent, format: currentFormat, quality: qualitySelect.value, source: currentTab,
     start: String(selStart), end: String(selEnd),
   });
   estimateSizeEl.textContent = "…";
   try {
     const res = await fetch(`${API}/api/estimate?` + p.toString());
     const data = await res.json();
-    estimateSizeEl.textContent = res.ok ? "~ " + fmtSize(data.bytes) : "—";
-  } catch { estimateSizeEl.textContent = "—"; }
+    if (seq === estimateSeq) estimateSizeEl.textContent = res.ok ? "~ " + fmtSize(data.bytes) : "—";
+  } catch { if (seq === estimateSeq) estimateSizeEl.textContent = "—"; }
 }
 
 // --- letöltés + folyamatok -------------------------------------------------
@@ -1339,12 +1715,13 @@ function queueSave(jobId) {
 
 async function download() {
   if (!info) return;
-  const u = urlInput.value.trim();
   const isFull = !(duration > 0) || (selStart <= 0.01 && selEnd >= duration - 0.01);
   const p = new URLSearchParams({
-    url: u, format: currentFormat, quality: qualitySelect.value, source: currentTab,
+    url: edUrl.textContent, format: currentFormat, quality: qualitySelect.value, source: currentTab,
   });
   if (!isFull) { p.set("start", String(selStart)); p.set("end", String(selEnd)); }
+  if (audioLang && !$("audioBlock").hidden) p.set("audio_lang", audioLang);
+  subtitleParams(p);
 
   downloadBtn.disabled = true;
   dlText.textContent = "Előkészítés…";
@@ -1379,6 +1756,8 @@ function paramsFromListItem(it) {
   const dur = it.duration || 0;
   const trimmed = (it.start > 0.01) || (it.end > 0 && it.end < dur - 0.01);
   if (trimmed && it.end > it.start) { p.set("start", String(it.start)); p.set("end", String(it.end)); }
+  if (it.audioLang) p.set("audio_lang", it.audioLang);
+  if (it.subs) { p.set("subs", it.subs); p.set("subs_auto", String(!!it.subsAuto)); p.set("subs_mode", it.subsMode || "embed"); }
   return p;
 }
 
@@ -1426,6 +1805,7 @@ function stopJobPollingIfIdle(jobs) {
   if (!anyActive) { clearInterval(jobPoll); jobPoll = null; }
 }
 
+let jobsSeeded = false;
 async function refreshJobsNow() {
   let jobs = [];
   try {
@@ -1438,10 +1818,28 @@ async function refreshJobsNow() {
   jobsBadge.textContent = String(active);
   jobsBadge.hidden = active === 0;
 
-  // a kész jobokat automatikusan mentésre ajánljuk (egyszer)
+  if (!jobsSeeded) {
+    // induláskor a már korábban kész (mentett) jobokról nem küldünk újra értesítést
+    jobsSeeded = true;
+    jobs.filter(j => j.status === "done" && j.saved).forEach(j => savedJobs.add(j.job_id));
+  }
   for (const j of jobs) {
-    if (j.status === "done" && !savedJobs.has(j.job_id)) {
-      savedJobs.add(j.job_id);
+    if (j.status !== "done" || savedJobs.has(j.job_id)) continue;
+    savedJobs.add(j.job_id);
+    if (j.saved) {
+      // automatikusan a letöltési mappába került → értesítés, galéria frissítése
+      const label = j.kind === "edit" ? "Szerkesztés kész" : "Letöltve";
+      toast(`${label}: ${j.title || j.filename}`, [
+        { label: "Lejátszás", action: () => window.galleryHooks?.play(j.libraryId) },
+        { label: "Mappában", action: () => revealLibrary(j.libraryId) },
+      ], "success");
+      if (j.warning) toast(j.warning, [], "error");
+      window.galleryHooks?.refresh();
+      if (j.job_id === activeJob) {
+        dlText.textContent = "Mentve ✓";
+        setTimeout(() => { progressBox.hidden = true; dlText.textContent = "Letöltés"; activeJob = null; }, 1800);
+      }
+    } else {
       queueSave(j.job_id);
     }
   }
@@ -1453,8 +1851,14 @@ async function refreshJobsNow() {
   }
 
   renderJobs(jobs);
-  if (jobsPanel.hidden === false) { /* nyitva: már renderelve */ }
   stopJobPollingIfIdle(jobs);
+}
+
+function revealLibrary(id) {
+  if (id) fetch(`${API}/api/library/${id}/reveal`, { method: "POST" });
+}
+function openLibraryFile(id) {
+  if (id) fetch(`${API}/api/library/${id}/open`, { method: "POST" });
 }
 
 function updateEditorProgress(j) {
@@ -1467,20 +1871,22 @@ function updateEditorProgress(j) {
   if (j.status === "done") { setProgress(100, "done"); return; }
   progressBox.hidden = false;
   setProgress(j.progress, j.stage);
-  if (j.stage === "downloading" && j.speed) progressMeta.textContent = fmtSpeed(j.speed);
-  else if (j.stage === "processing") progressMeta.textContent = "egyesítés…";
+  if (j.stage === "downloading" && j.speed) progressMeta.textContent = fmtSpeed(j.speed) + (j.eta ? ` · ${fmtTime(j.eta)}` : "");
+  else if (j.stage === "processing") progressMeta.textContent = "feldolgozás…";
   else progressMeta.textContent = "";
 }
 
-// A kész fájl mentése. Natív ablakban a pywebview "Mentés másként" párbeszéde nyílik
-// (a felhasználó választja a helyet); böngésző-tartalékban a szokásos letöltés.
+// „Mindig rákérdez” módban a kész fájl mentése a natív Mentés másként ablakkal.
 async function saveFinished(jobId) {
   const hasNative = window.pywebview && window.pywebview.api && window.pywebview.api.save_file;
   if (hasNative) {
     try {
       const r = await window.pywebview.api.save_file(jobId);
-      if (r && r.ok) { if (jobId === activeJob) { dlText.textContent = "Mentve ✓"; } }
-      else if (r && r.error) { showStatus(r.error, "error"); }
+      if (r && r.ok) {
+        if (jobId === activeJob) dlText.textContent = "Mentve ✓";
+        toast("Mentve: " + r.path.split(/[\\/]/).pop(), [{ label: "Galéria", action: () => window.galleryHooks?.open() }], "success");
+        window.galleryHooks?.refresh();
+      } else if (r && r.error) toast(r.error, [], "error");
     } catch (e) { console.warn("mentés hiba:", e); }
   } else {
     const f = document.createElement("iframe");
@@ -1501,10 +1907,11 @@ async function saveFinished(jobId) {
 const _jobCards = new Map();   // job_id -> { el, fill, meta, x }
 
 function statusText(j) {
+  if (j.status === "running" && j.stage === "processing") return "Feldolgozás… " + Math.round(j.progress) + "%";
   return {
     running: Math.round(j.progress) + "%", starting: "Indul…",
     processing: "Feldolgozás…", canceling: "Megszakítás…",
-    done: "Kész ✓", error: "Hiba", canceled: "Megszakítva",
+    done: j.saved ? "Kész ✓ · a Galériában" : "Kész ✓", error: "Hiba", canceled: "Megszakítva",
   }[j.status] || j.status;
 }
 
@@ -1516,32 +1923,27 @@ function renderJobs(jobs) {
     seen.add(j.job_id);
     let c = _jobCards.get(j.job_id);
     if (!c) {
-      // ÚJ kártya — egyszer hozzuk létre (az animáció csak most fut le)
       const el = document.createElement("div");
       el.className = "job-card status-" + j.status;
       const thumb = j.thumbnail ? `${API}/api/thumb?url=` + encodeURIComponent(j.thumbnail) : "";
-      const srcLabel = { instagram: "IG", youtube: "YT", tiktok: "TikTok" }[j.source] || "WEB";
+      const srcLabel = j.kind === "edit" ? "VÁGÁS" : ({ instagram: "IG", youtube: "YT", tiktok: "TikTok" }[j.source] || "WEB");
       el.innerHTML = `
         <div class="jc-thumb">${thumb ? `<img src="${thumb}" alt="" onerror="this.style.display='none'">` : ""}
-          <span class="jc-badge ${j.source}">${sourceLogo(j.source)}${srcLabel}</span>
+          <span class="jc-badge ${j.source}">${j.kind === "edit" ? "" : sourceLogo(j.source)}${srcLabel}</span>
         </div>
         <div class="jc-body">
-          <div class="jc-title">${escapeHtml(j.title || j.filename || "videó")}</div>
+          <div class="jc-title">${escapeHtml(j.title || j.filename || "videó")}${j.origin === "ai" ? ' <span class="ai-tag">AI</span>' : ""}</div>
           <div class="jc-bar"><div class="jc-fill"></div></div>
-          <div class="jc-meta"><span class="jc-stat"></span><span class="jc-fmt">${(j.format||"").toUpperCase()}</span></div>
+          <div class="jc-meta"><span class="jc-stat"></span><span class="jc-fmt">${(j.format || "").toUpperCase()}${j.quality ? " · " + escapeHtml(j.quality) + (j.format === "mp3" ? "k" : "p") : ""}</span></div>
+          <div class="jc-actions"></div>
         </div>
         <button class="jc-x">
           <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M18.3 5.7L12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7l1.4-1.4L10.6 10.6 16.9 4.3z"/></svg>
         </button>`;
       const x = el.querySelector(".jc-x");
-      c = { el, fill: el.querySelector(".jc-fill"), stat: el.querySelector(".jc-stat"), x, meta: j };
-      const save = document.createElement("button");
-      save.className = "jc-save";
-      save.textContent = "Fájl mentése";
-      save.addEventListener("click", e => { e.stopPropagation(); queueSave(j.job_id); });
-      el.querySelector(".jc-body").appendChild(save);
-      c.save = save;
-      el.querySelector(".jc-body").addEventListener("click", () => reopenFromJob(c.meta));
+      c = { el, fill: el.querySelector(".jc-fill"), stat: el.querySelector(".jc-stat"), x, meta: j,
+            actions: el.querySelector(".jc-actions"), actionState: "" };
+      el.querySelector(".jc-body").addEventListener("click", (e) => { if (!e.target.closest("button")) reopenFromJob(c.meta); });
       el.querySelector(".jc-thumb").addEventListener("click", () => reopenFromJob(c.meta));
       x.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -1550,26 +1952,38 @@ function renderJobs(jobs) {
       });
       _jobCards.set(j.job_id, c);
     }
-    // pozíció (sorrend) — csak ha kell
     if (jobsList.children[idx] !== c.el) {
       jobsList.insertBefore(c.el, jobsList.children[idx] || null);
     }
-    // FRISSÍTÉS (csak a változó értékek — nincs újraépítés)
     c.el.className = "job-card status-" + j.status;
     const pct = j.status === "done" ? 100 : j.progress;
     c.fill.style.width = pct + "%";
-    const speed = (j.status === "running" && j.speed) ? " · " + fmtSpeed(j.speed) : "";
+    const speed = (j.status === "running" && j.speed && j.stage === "downloading") ? " · " + fmtSpeed(j.speed) : "";
     c.stat.textContent = statusText(j) + speed;
     const isActive = ["running", "starting", "canceling", "processing"].includes(j.status);
     c.x.dataset.active = String(isActive);
-    c.x.title = isActive ? "Megszakítás" : "Eltávolítás";
+    c.x.title = isActive ? "Megszakítás" : "Eltávolítás a listából";
     c.meta = j;
-    c.save.hidden = j.status !== "done";
     c.stat.title = j.error || "";
     if (j.status === "error") c.stat.textContent = j.error || "Sikertelen letöltés";
+    const state = j.status === "done" ? (j.saved ? "saved" : "unsaved") : "";
+    if (state !== c.actionState) {
+      c.actionState = state;
+      const buttons = state === "saved"
+        ? [["Lejátszás", () => window.galleryHooks?.play(j.libraryId)], ["Megnyitás", () => openLibraryFile(j.libraryId)],
+           ["Mappában", () => revealLibrary(j.libraryId)]]
+        : state === "unsaved" ? [["Fájl mentése", () => queueSave(j.job_id)]] : [];
+      c.actions.replaceChildren(...buttons.map(([label, action]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "jc-save";
+        button.textContent = label;
+        button.addEventListener("click", (e) => { e.stopPropagation(); action(); });
+        return button;
+      }));
+    }
   });
 
-  // eltűnt jobok kártyáinak eltávolítása
   for (const [id, c] of _jobCards) {
     if (!seen.has(id)) { c.el.remove(); _jobCards.delete(id); }
   }
@@ -1578,17 +1992,21 @@ function renderJobs(jobs) {
 // egy folyamat kártyájára kattintva visszahozzuk a videót és a kijelölt vágást
 async function reopenFromJob(j) {
   closeJobs();
+  if (j.kind === "edit" || !j.url) {
+    if (j.libraryId) window.galleryHooks?.play(j.libraryId);
+    else window.galleryHooks?.open();
+    return;
+  }
   // a megfelelő tabra váltunk
-  if (j.source !== currentTab) setTab(j.source);
+  if (j.source !== currentTab) setTab(j.source === "other" ? "any" : j.source);
   // betöltjük az URL-t (ez beállítja az editort), majd ráállítjuk a vágást/minőséget
   if (!await loadFromUrl(j.url)) return;
   if (j.quality) {
     // formátum a fájlnévből: ha mp3, váltsunk
     const isMp3 = (j.format === "mp3");
-    currentFormat = isMp3 ? "mp3" : "mp4";
-    formatToggle.querySelectorAll(".seg").forEach((s) => s.classList.toggle("active", s.dataset.format === currentFormat));
+    setFormat(isMp3 ? "mp3" : "mp4", false);
     updateQuality();
-    qualitySelect.value = String(j.quality);
+    setQuality(String(j.quality), false);
   }
   pendingSelection = { start: j.start, end: j.end };
   if (duration > 0 && (j.start || j.end)) {
@@ -1636,7 +2054,7 @@ function currentEditorAsItem() {
   const trimmed = (selStart > 0.01) || (selEnd > 0 && selEnd < dur - 0.01);
   return {
     id: editingListId || ("li_" + Math.random().toString(36).slice(2, 10)),
-    url: urlInput.value.trim(),
+    url: edUrl.textContent,
     source: info.source || currentTab,
     title: info.title || "videó",
     thumbnail: info.thumbnail || "",
@@ -1646,6 +2064,10 @@ function currentEditorAsItem() {
     end: trimmed ? selEnd : dur,
     duration: dur,
     estBytes: 0,
+    audioLang: $("audioBlock").hidden ? "" : audioLang,
+    subs: $("subsSelect").value ? $("subsSelect").value.slice(2) : "",
+    subsAuto: $("subsSelect").value.startsWith("a:"),
+    subsMode: $("subsMode").querySelector(".active")?.dataset.mode || "embed",
   };
 }
 
@@ -1804,10 +2226,18 @@ async function openListItem(id) {
   editingListId = id;            // FONTOS: loadFromUrl → openEditor előtt, hogy a gombok jól álljanak
   if (!await loadFromUrl(it.url, true)) return;
   // formátum + minőség visszaállítása
-  currentFormat = it.format === "mp3" ? "mp3" : "mp4";
-  formatToggle.querySelectorAll(".seg").forEach((s) => s.classList.toggle("active", s.dataset.format === currentFormat));
+  setFormat(it.format === "mp3" ? "mp3" : "mp4", false);
   updateQuality();
-  if (it.quality) qualitySelect.value = String(it.quality);
+  if (it.quality) setQuality(String(it.quality), false);
+  if (it.audioLang) setAudioLang(it.audioLang);
+  if (it.subs) {
+    const value = (it.subsAuto ? "a:" : "m:") + it.subs;
+    if ([...$("subsSelect").options].some(o => o.value === value)) {
+      $("subsSelect").value = value;
+      for (const b of $("subsMode").children) b.classList.toggle("active", b.dataset.mode === (it.subsMode || "embed"));
+      $("subsMode").hidden = currentFormat === "mp3";
+    }
+  }
   // Restore after metadata arrives too, when the original site omitted duration.
   pendingSelection = { start: it.start, end: it.end };
   if (duration > 0) {
@@ -1922,49 +2352,161 @@ downloadBtn.addEventListener("click", download);
 
 setTab("any");
 
-// Native chrome and keyboard navigation use the same controls as the pointer UI.
-function enableNativeChrome() {
-  if (!window.pywebview?.api?.window_action) return;
+// Native chrome: Windows' own move/resize loop (Aero Snap, drag-to-top maximise,
+// drag-down restore) through the native API; the pointer UI only starts it.
+let nativeFrame = false;
+async function enableNativeChrome() {
+  const api = window.pywebview?.api;
+  if (!api?.window_action) return;
   document.body.classList.add("native");
   $("windowControls").hidden = false;
+  try {
+    const state = await api.window_state?.();
+    nativeFrame = !!state?.native;
+    document.body.classList.toggle("native-frame", nativeFrame);
+    document.body.classList.toggle("maximized", !!state?.maximized);
+  } catch { /* older API */ }
 }
 window.addEventListener("pywebviewready", enableNativeChrome);
 enableNativeChrome();
+async function syncWindowState() {
+  const state = await window.pywebview?.api?.window_state?.().catch(() => null);
+  if (state) document.body.classList.toggle("maximized", !!state.maximized);
+}
+let windowStateTimer;
+window.addEventListener("resize", () => { clearTimeout(windowStateTimer); windowStateTimer = setTimeout(syncWindowState, 120); });
 async function windowAction(action) {
   const result = await window.pywebview?.api?.window_action(action);
-  if (result) document.body.classList.toggle("maximized", result.maximized);
+  if (result) document.body.classList.toggle("maximized", !!result.maximized);
 }
 document.querySelectorAll("[data-window]").forEach(button => {
   button.addEventListener("click", () => windowAction(button.dataset.window));
 });
-document.querySelector(".titlebar-drag").addEventListener("dblclick", () => windowAction("maximize"));
-const grip = document.createElement("div");
-grip.className = "resize-grip";
-document.body.appendChild(grip);
-grip.addEventListener("pointerdown", e => {
-  grip.setPointerCapture(e.pointerId);
-  const start = { x: e.screenX, y: e.screenY, w: window.innerWidth, h: window.innerHeight };
-  const resize = ev => window.pywebview?.api?.resize_window(start.w + ev.screenX - start.x, start.h + ev.screenY - start.y);
-  let last = 0;
-  grip.onpointermove = ev => { if (performance.now() - last > 40) { resize(ev); last = performance.now(); } };
-  grip.onpointerup = ev => { resize(ev); grip.onpointermove = null; grip.onpointerup = null; };
+const titlebarDrag = $("titlebarDrag");
+titlebarDrag.addEventListener("mousedown", (event) => {
+  if (event.button !== 0 || !nativeFrame) return;
+  event.preventDefault();
+  // A natív mozgatás elnyeli az egérfelengedést, ezért a dupla kattintást itt kezeljük.
+  if (event.detail === 2) windowAction("maximize");
+  else if (event.detail === 1) window.pywebview.api.begin_drag("caption");
 });
+titlebarDrag.addEventListener("dblclick", () => { if (!nativeFrame) windowAction("maximize"); });
+if (!nativeFrame) titlebarDrag.classList.add("pywebview-drag-region");
+window.addEventListener("pywebviewready", () => setTimeout(() => {
+  if (nativeFrame) titlebarDrag.classList.remove("pywebview-drag-region");
+}, 300));
+$("resizeEdges").addEventListener("mousedown", (event) => {
+  const edge = event.target.dataset.edge;
+  if (!edge || event.button !== 0 || !nativeFrame) return;
+  event.preventDefault();
+  window.pywebview.api.begin_drag(edge);
+});
+
+// --- háttér-figyelés: AI által indított letöltések, jóváhagyások ---
+const shownApprovals = new Map();
+let lastLibraryRev = null;
+async function pulse() {
+  try {
+    const data = await (await fetch(`${API}/api/pulse`, { cache: "no-store" })).json();
+    if (data.active && !jobPoll) startJobPolling();
+    if (lastLibraryRev !== null && data.library !== lastLibraryRev) window.galleryHooks?.refresh();
+    lastLibraryRev = data.library;
+    renderApprovals(data.approvals || []);
+  } catch { /* the server restarts during updates */ }
+}
+setInterval(pulse, 1500);
+pulse();
+
+function renderApprovals(list) {
+  const holder = $("approvals");
+  const ids = new Set(list.map(x => x.id));
+  for (const [id, el] of shownApprovals) {
+    if (!ids.has(id)) { el.remove(); shownApprovals.delete(id); }
+  }
+  for (const item of list) {
+    if (shownApprovals.has(item.id)) continue;
+    const card = document.createElement("div");
+    card.className = "approval-card";
+    card.innerHTML = `
+      <div class="approval-head"><span class="ai-tag">AI</span><strong>Engedélyt kér</strong></div>
+      <p></p>
+      <div class="approval-actions">
+        <button type="button" class="btn-list" data-allow="false">Elutasítás</button>
+        <button type="button" class="btn-primary" data-allow="true">Engedélyezés</button>
+      </div>`;
+    card.querySelector("p").textContent = item.summary;
+    card.addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-allow]");
+      if (!button) return;
+      card.classList.add("leaving");
+      await fetch(`${API}/api/mcp/approve/${item.id}?allow=${button.dataset.allow}`, { method: "POST" }).catch(() => {});
+      setTimeout(() => card.remove(), 200);
+    });
+    holder.appendChild(card);
+    shownApprovals.set(item.id, card);
+    if (document.hidden || !document.hasFocus()) window.pywebview?.api?.flash_window?.();
+  }
+}
+
+// --- vágólap-figyelés: ha videólink van a vágólapon, felajánljuk a megnyitását ---
+let lastClipboard = "";
+async function checkClipboard() {
+  if (landing.hidden) return;
+  try {
+    const native = window.pywebview?.api;
+    const text = (native?.clipboard_text ? await native.clipboard_text() : await navigator.clipboard.readText())?.trim() || "";
+    if (!text || text === lastClipboard || text.length > 2000 || !/^https?:\/\/\S+$/i.test(text)) return;
+    lastClipboard = text;
+    if (text === urlInput.value.trim()) return;
+    const chip = $("clipChip");
+    let host = "";
+    try { host = new URL(text).hostname.replace(/^www\./, ""); } catch { return; }
+    chip.textContent = `Link a vágólapon (${host}) — megnyitás`;
+    chip.hidden = false;
+    chip.onclick = () => { chip.hidden = true; urlInput.value = text; handleInput(); };
+  } catch { /* clipboard unavailable */ }
+}
+window.addEventListener("focus", checkClipboard);
+setTimeout(checkClipboard, 1200);
+
+// --- link behúzása az ablakba ---
+document.addEventListener("dragover", (event) => {
+  if ([...event.dataTransfer.types].some(t => t === "text/uri-list" || t === "text/plain")) {
+    event.preventDefault();
+    document.body.classList.add("dropping");
+  }
+});
+document.addEventListener("dragleave", (event) => { if (!event.relatedTarget) document.body.classList.remove("dropping"); });
+document.addEventListener("drop", (event) => {
+  document.body.classList.remove("dropping");
+  const text = (event.dataTransfer.getData("text/uri-list") || event.dataTransfer.getData("text/plain") || "").split("\n")[0].trim();
+  if (!/^https?:\/\//i.test(text)) return;
+  event.preventDefault();
+  if (!editor.hidden || !$("gallery").hidden) { stopPreview(); showView("landing"); }
+  urlInput.value = text;
+  handleInput();
+});
+
+$("copyLinkBtn").addEventListener("click", () => copyText(edUrl.textContent, "Link másolva."));
+
 const inputMode = document.documentElement.dataset;
 document.addEventListener("pointerdown", () => { inputMode.interaction = "pointer"; }, true);
 document.addEventListener("keydown", e => {
   if (e.key === "Tab") inputMode.interaction = "keyboard";
+  const dialogOpen = document.querySelector("dialog[open]");
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-    if ($("settingsDialog").open) return;
+    if (dialogOpen) return;
     e.preventDefault(); closeList(); closeJobs(); stopPreview(); showView("landing");
     if (!channelProfile.hidden) setTab("youtube");
     urlInput.focus(); urlInput.select();
   }
   if (e.key === "Escape") {
+    if (!$("contextMenu").hidden) { hideContextMenu(); return; }
     if (listPanel.classList.contains("open")) { closeList(); listBtn.focus(); }
     else if (jobsPanel.classList.contains("open")) { closeJobs(); jobsBtn.focus(); }
   }
   const panel = listPanel.classList.contains("open") ? listPanel : jobsPanel.classList.contains("open") ? jobsPanel : null;
-  const editorShortcut = !editor.hidden && !panel && !$("settingsDialog").open && !e.defaultPrevented
+  const editorShortcut = !editor.hidden && !panel && !dialogOpen && !e.defaultPrevented
     && !e.ctrlKey && !e.altKey && !e.metaKey
     && !e.target.closest("input, textarea, select, [contenteditable], [role='slider']");
   if (editorShortcut && e.code === "Space") {
@@ -1977,6 +2519,9 @@ document.addEventListener("keydown", e => {
     e.preventDefault();
     const offset = e.key === "ArrowLeft" ? -5 : 5;
     seekDuringPreview(Math.max(0, Math.min(duration, (pendingPreviewSeek ?? igVideo.currentTime) + offset)));
+  } else if (editorShortcut && e.key.toLowerCase() === "c") {
+    e.preventDefault();
+    window.playerHooks?.toggleCaptions();
   }
   if (e.key === "Tab" && panel) {
     const focusable = [...panel.querySelectorAll('button, input, select, [tabindex="0"]')].filter(x => !x.disabled && x.getClientRects().length);

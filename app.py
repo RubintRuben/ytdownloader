@@ -19,6 +19,10 @@ Végpontok:
 import os
 import re
 import sys
+
+if __name__ == "__main__" and "--mcp" in sys.argv[1:]:
+    import mcp_bridge  # lightweight: no yt-dlp/server imports for the MCP relay
+    raise SystemExit(mcp_bridge.main())
 import json
 import base64
 import shutil
@@ -49,6 +53,9 @@ from yt_dlp.networking import Request as MediaRequest
 from yt_dlp.networking.exceptions import HTTPError as MediaHTTPError, RequestError as MediaRequestError
 from yt_dlp.networking.impersonate import ImpersonateTarget
 from yt_dlp.utils import download_range_func
+import library as media_library
+import mcp_server
+import yt_web
 from updater import DesktopUpdater
 from version import APP_VERSION
 
@@ -84,7 +91,11 @@ SETTINGS_FILE = USER_DATA_DIR / "settings.json"
 LOG_FILE = USER_DATA_DIR / "downloader.log"
 _SHORTCUT_ANSWERED_KEY = "shortcut_answered"
 _SHORTCUT_CREATED_KEY = "shortcut_created"
-_THEMES = {"light", "dark", "aurora", "ocean", "ember", "orchid", "graphite"}
+_THEMES = {"light", "dark", "aurora", "ocean", "ember", "orchid", "graphite", "blackhole", "deepsea", "rain", "custom"}
+_ICON_THEME = {"blackhole": "graphite", "deepsea": "ocean", "rain": "aurora", "custom": "dark"}
+SERVER_FILE = USER_DATA_DIR / "server.json"
+BACKGROUND_DIR = USER_DATA_DIR / "backgrounds"
+_library = media_library.Library(USER_DATA_DIR)
 _updater = DesktopUpdater(LOG_FILE)
 _job_admission = threading.Lock()
 
@@ -516,13 +527,22 @@ def _direct_preview_format(info: dict) -> dict | None:
                 and fmt.get("acodec") in {"aac", "mp4a.40.2"}), key=_preview_rank, default=None)
 
 
-def _stream_preview_formats(info: dict) -> tuple[dict, ...]:
+def _stream_preview_formats(info: dict, audio_lang: str | None = None) -> tuple[dict, ...]:
     formats = [fmt for fmt in [*(info.get("formats") or []), info]
                if fmt.get("protocol") in {"http", "https", "m3u8", "m3u8_native"}
                and not fmt.get("has_drm") and is_http_url(fmt.get("url") or "")]
     has_audio = any(_has_codec(fmt, "a") for fmt in [*(info.get("formats") or []), info])
-    audio = min((fmt for fmt in formats if _has_codec(fmt, "a") and not _has_codec(fmt, "v")),
-                key=lambda fmt: abs((fmt.get("abr") or 96) - 96), default=None)
+    audio_only = [fmt for fmt in formats if _has_codec(fmt, "a") and not _has_codec(fmt, "v")]
+    if audio_lang and any(fmt.get("language") == audio_lang for fmt in audio_only):
+        audio_only = [fmt for fmt in audio_only if fmt.get("language") == audio_lang]
+    elif any((fmt.get("language_preference") or -1) >= 10 for fmt in audio_only):
+        audio_only = [fmt for fmt in audio_only if (fmt.get("language_preference") or -1) >= 10]
+    audio = min(audio_only, key=lambda fmt: abs((fmt.get("abr") or 96) - 96), default=None)
+    if audio_lang and audio:  # a muxed stream would carry the default language
+        video = min((fmt for fmt in formats if _has_codec(fmt, "v") and not _has_codec(fmt, "a")),
+                    key=_preview_rank, default=None)
+        if video:
+            return video, audio
     video = min((fmt for fmt in formats if _has_codec(fmt, "v")
                  and (_has_codec(fmt, "a") or audio or not has_audio)),
                 key=_preview_rank, default=None)
@@ -904,19 +924,196 @@ async def api_search(q: str = Query(..., max_length=300), limit: int = 18, sourc
     return {"results": videos, "channels": [], "source": source, "kind": "videos"}
 
 
-@app.get("/api/yt/channel")
-async def api_yt_channel(channel_id: str = Query(...), limit: int = 48):
-    """Egy YouTube csatorna legutóbbi videói (a csatorna-kártyára kattintva)."""
+_web_cache: OrderedDict = OrderedDict()
+
+
+async def _web_cached(key, factory):
+    hit = _web_cache.get(key)
+    if hit and time.monotonic() - hit[0] < 300:
+        return hit[1]
+    value = await factory()
+    _web_cache[key] = (time.monotonic(), value)
+    while len(_web_cache) > 96:
+        _web_cache.popitem(last=False)
+    return value
+
+
+def _flat_to_web(item: dict) -> dict:
+    return {"kind": "short" if "/shorts/" in item["url"] else "video", "id": item["id"], "url": item["url"],
+            "title": item["title"], "thumbnail": item["thumbnail"], "duration": item["duration"],
+            "length": _fmt_clock(item["duration"]) if item["duration"] else "", "views": "", "published": "",
+            "uploader": item["uploader"], "channelId": None, "avatar": "", "verified": False, "live": False}
+
+
+def _fmt_clock(seconds: float) -> str:
+    seconds = int(seconds or 0)
+    h, m, s = seconds // 3600, seconds % 3600 // 60, seconds % 60
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+async def youtube_search(query: str, page: str | None = None, channels_only: bool = False) -> dict:
+    """YouTube-like results (videos + Shorts shelf + channels) with continuation."""
+    key = ("search", query.casefold(), page, channels_only)
     try:
-        channel_url = _youtube_channel_url(channel_id.strip())
+        return await _web_cached(key, lambda: yt_web.search(query, page, channels_only))
+    except Exception as exc:  # noqa: BLE001 - fall back to yt-dlp when the web API changes
+        _log(f"InnerTube search failed: {type(exc).__name__}: {str(exc)[:160]}")
+        if page:
+            return {"videos": [], "shorts": [], "channels": [], "next": None}
+        if channels_only:
+            return {"videos": [], "shorts": [], "channels": [
+                {**c, "kind": "channel", "subs": "", "handle": "", "verified": False}
+                for c in await asyncio.to_thread(_search_youtube_channels, query, 8)], "next": None}
+        items = [_flat_to_web(x) for x in await asyncio.to_thread(_search_youtube, query, 30)]
+        return {"videos": [x for x in items if x["kind"] == "video"],
+                "shorts": [x for x in items if x["kind"] == "short"], "channels": [], "next": None}
+
+
+@app.get("/api/yt/search")
+async def api_yt_search(q: str = Query("", max_length=300), page: str = Query("", max_length=4000),
+                        channels: bool = False):
+    if not q.strip() and not page:
+        raise HTTPException(400, "Üres keresés.")
+    return await youtube_search(q.strip(), page or None, channels)
+
+
+async def youtube_channel(ref: str, tab: str = "videos", page: str | None = None) -> dict:
+    if tab not in ("videos", "shorts", "streams"):
+        tab = "videos"
+    key = ("channel", ref, tab, page)
+    try:
+        return await _web_cached(key, lambda: yt_web.channel(ref, tab, page))
+    except Exception as exc:  # noqa: BLE001
+        _log(f"InnerTube channel failed: {type(exc).__name__}: {str(exc)[:160]}")
+        if page:
+            return {"items": [], "next": None}
+        channel_url = _youtube_channel_url(ref)
+        if tab == "shorts":
+            channel_url = channel_url.removesuffix("/videos") + "/shorts"
+        data = await _cached_search("channel", channel_url, 48, _youtube_channel_videos)
+        legacy = data["channel"]
+        stats = [f"{legacy['followers']:,} feliratkozó".replace(",", " ")] if legacy.get("followers") else []
+        return {"channel": {**legacy, "handle": legacy.get("handle") or "", "stats": stats},
+                "tabs": ["videos", "shorts"], "tab": tab, "next": None,
+                "items": [_flat_to_web(x) | ({"kind": "short", "url": f"https://www.youtube.com/shorts/{x['id']}"}
+                                             if tab == "shorts" else {}) for x in data["videos"]]}
+
+
+@app.get("/api/yt/channel")
+async def api_yt_channel(channel_id: str = Query(..., max_length=400), tab: str = "videos",
+                         page: str = Query("", max_length=4000)):
+    """Egy YouTube csatorna fejléce és feltöltései (Videók / Shorts / Élő), lapozással."""
+    ref = channel_id.strip()
+    try:
+        if not re.fullmatch(r"UC[A-Za-z0-9_-]{22}", ref):
+            _youtube_channel_url(ref)
     except ValueError as exc:
         raise HTTPException(400, "Érvénytelen YouTube-csatorna.") from exc
-    limit = max(1, min(80, limit))
     try:
-        return await _cached_search("channel", channel_url, limit, _youtube_channel_videos)
+        return await youtube_channel(ref, tab, page or None)
     except Exception as exc:
         _log(f"YouTube channel failed: {type(exc).__name__}")
         raise HTTPException(502, "A csatorna adatai most nem érhetők el.") from exc
+
+
+# ----------------------------------------------------------------------------
+# Hangsávok és feliratok
+# ----------------------------------------------------------------------------
+
+_subtitle_sources: OrderedDict = OrderedDict()
+_subtitle_cache: OrderedDict = OrderedDict()
+
+
+def _audio_tracks(info: dict) -> list[dict]:
+    """Dubbed/alternative audio languages (only when there is more than one)."""
+    tracks: dict[str, dict] = {}
+    for fmt in info.get("formats") or []:
+        lang = fmt.get("language")
+        if not lang or not _has_codec(fmt, "a") or _has_codec(fmt, "v"):
+            continue
+        note = (fmt.get("format_note") or "").split(",")[0]
+        label = re.sub(r"\s*(original|\(default\)|default)\s*", " ", note).strip() or lang
+        pref = fmt.get("language_preference") or -1
+        current = tracks.get(lang)
+        if not current or pref > current["pref"]:
+            tracks[lang] = {"lang": lang, "label": label, "original": pref >= 10, "pref": pref}
+    if len(tracks) < 2:
+        return []
+    ordered = sorted(tracks.values(), key=lambda t: (-t["pref"], t["label"]))
+    return [{k: v for k, v in t.items() if k != "pref"} for t in ordered]
+
+
+def _subtitle_listing(info: dict) -> dict:
+    manual = [{"lang": lang, "name": (entries[0].get("name") if entries else "") or lang}
+              for lang, entries in (info.get("subtitles") or {}).items()
+              if lang != "live_chat" and entries]
+    auto = list((info.get("automatic_captions") or {}).keys())
+    original = next((k[:-5] for k in auto if k.endswith("-orig")), None)
+    if not original and auto and info.get("language") in auto:
+        original = info.get("language")
+    return {"subtitles": manual, "captionsOrig": original,
+            "translate": [k for k in auto if not k.endswith("-orig")] if original else []}
+
+
+def _vtt_time(ms: float) -> str:
+    ms = max(0, int(ms))
+    return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d}.{ms % 1000:03d}"
+
+
+def _json3_to_vtt(data: dict) -> str:
+    lines = ["WEBVTT", ""]
+    for event in data.get("events") or []:
+        text = "".join(seg.get("utf8", "") for seg in event.get("segs") or []).strip()
+        if not text or "tStartMs" not in event:
+            continue
+        start = event["tStartMs"]
+        end = start + (event.get("dDurationMs") or 2000)
+        text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        lines += [f"{_vtt_time(start)} --> {_vtt_time(end)}", text, ""]
+    return "\n".join(lines)
+
+
+def _subtitle_entry(info: dict, lang: str, auto: bool) -> dict | None:
+    if auto:
+        table = info.get("automatic_captions") or {}
+        entries = table.get(lang) or table.get(f"{lang}-orig") or []
+    else:
+        entries = (info.get("subtitles") or {}).get(lang) or []
+    by_ext = {e.get("ext"): e for e in entries if e.get("url")}
+    return by_ext.get("json3") or by_ext.get("vtt") or next(iter(by_ext.values()), None)
+
+
+@app.get("/api/subs/{key}")
+async def api_subs(key: str, lang: str = Query(..., max_length=40), auto: bool = False):
+    source = _subtitle_sources.get(key)
+    if not source:
+        raise HTTPException(404, "A felirat linkje lejárt.")
+    cache_key = (key, lang, auto)
+    if cache_key in _subtitle_cache:
+        return Response(_subtitle_cache[cache_key], media_type="text/vtt; charset=utf-8")
+    entry = _subtitle_entry(source[1], lang, auto)
+    if not entry or not is_http_url(entry["url"]):
+        raise HTTPException(404, "Ez a felirat nem érhető el.")
+    try:
+        response = await _get_img_client().get(entry["url"], headers={
+            k: v for k, v in (entry.get("http_headers") or {}).items() if k.lower() in ("user-agent", "referer")})
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "A felirat nem tölthető le.") from exc
+    if response.status_code == 429:
+        raise HTTPException(429, "A YouTube most korlátozza a fordított feliratokat. Próbáld kicsit később.")
+    if response.status_code != 200:
+        raise HTTPException(502, "A felirat nem tölthető le.")
+    if entry.get("ext") == "json3":
+        try:
+            text = _json3_to_vtt(response.json())
+        except ValueError as exc:
+            raise HTTPException(502, "A felirat formátuma hibás.") from exc
+    else:
+        text = response.text if response.text.lstrip().startswith("WEBVTT") else "WEBVTT\n\n" + response.text
+    _subtitle_cache[cache_key] = text
+    while len(_subtitle_cache) > 48:
+        _subtitle_cache.popitem(last=False)
+    return Response(text, media_type="text/vtt; charset=utf-8")
 
 
 # ----------------------------------------------------------------------------
@@ -971,7 +1168,16 @@ async def api_info(url: str = Query(...), browser: str = "", source: str = "any"
     # ott egyszerű, kattintható idősávot rajzol storyboard-kockák nélkül).
     sb = storyboard_url(info) if is_yt else None
     direct, stream, has_audio = (None, None, False) if info.get("is_live") else _register_preview(info)
+    subs_key = os.urandom(12).hex()
+    _subtitle_sources[subs_key] = (time.monotonic(), info)
+    while len(_subtitle_sources) > 64:
+        _subtitle_sources.popitem(last=False)
     return {
+        "audioTracks": _audio_tracks(info),
+        **_subtitle_listing(info),
+        "subsKey": subs_key,
+        "views": info.get("view_count"),
+        "uploadDate": info.get("upload_date"),
         "id": info.get("id"),
         "source": source,
         "title": info.get("title") or info.get("description") or info.get("id") or "Videó",
@@ -1122,8 +1328,10 @@ _stream_slots = asyncio.Semaphore(3)
 
 
 @app.get("/api/preview/stream/{key}")
-async def api_preview_stream(key: str, start: float = 0):
+async def api_preview_stream(key: str, start: float = 0, audio: str = Query("", max_length=40)):
     info, _, streams = _get_preview_source(key)
+    if audio:
+        streams = _stream_preview_formats(info, audio) or streams
     if not streams:
         raise HTTPException(404, "Nincs streamelhető előnézet.")
     if not math.isfinite(start) or start < 0:
@@ -1294,7 +1502,7 @@ class _Cancelled(Exception):
 
 def _build_opts(job_id: str, url: str, job_dir: Path, fmt: str, quality: str,
                 start: float, end: float, duration: float,
-                browser: str | None = None) -> dict:
+                browser: str | None = None, audio_lang: str | None = None) -> dict:
     out_tmpl = str(job_dir / "out.%(ext)s")
     do_trim = start > 0 or (end > 0 and (not duration or end < duration - 0.05))
 
@@ -1389,6 +1597,8 @@ def _build_opts(job_id: str, url: str, job_dir: Path, fmt: str, quality: str,
         br = quality or "192"
         # az 'iamf' (új, ritkán támogatott) audio codecet kerüljük, hogy biztos legyen a konvertálás
         opts["format"] = "bestaudio[acodec!=?iamf]/bestaudio/best"
+        if audio_lang:
+            opts["format"] = f"bestaudio[language={audio_lang}]/" + opts["format"]
         opts["postprocessors"] = [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
@@ -1407,6 +1617,9 @@ def _build_opts(job_id: str, url: str, job_dir: Path, fmt: str, quality: str,
             f"bestvideo[height<={max_h}]+bestaudio[acodec!=?iamf]/"
             f"best[height<={max_h}]/best"
         )
+        if audio_lang:
+            opts["format"] = (f"bestvideo[height<={max_h}][ext=mp4]+bestaudio[language={audio_lang}][ext=m4a]/"
+                              f"bestvideo[height<={max_h}]+bestaudio[language={audio_lang}]/" + opts["format"])
         opts["format_sort"] = ["res", "vcodec:h264", "acodec:aac"]
         opts["merge_output_format"] = "mp4"
         opts["postprocessors"] = [{"key": "FFmpegVideoRemuxer", "preferedformat": "mp4"}]
@@ -1545,7 +1758,10 @@ def _run_job(job_id: str, url: str, fmt: str, opts: dict, ext: str, est_bytes: i
                 raise RuntimeError("A vágott fájl nem tartalmaz lejátszható médiát.")
         if job.get("status") == "canceling":
             raise _Cancelled()
+        output = _attach_subtitles(job, output, ffmpeg)
         job["path"] = str(output)
+        if job.get("auto_save"):
+            _auto_save(job_id, job, ffmpeg)
         job["progress"] = 100.0
         job["stage"] = "done"
         job["status"] = "done"
@@ -1568,6 +1784,106 @@ def _run_job(job_id: str, url: str, fmt: str, opts: dict, ext: str, est_bytes: i
         shutil.rmtree(job["dir"], ignore_errors=True)
 
 
+def _srt_time(ms: float) -> str:
+    return _vtt_time(ms).replace(".", ",")
+
+
+def _subtitle_cues(entry: dict) -> list[tuple[int, int, str]]:
+    with httpx.Client(timeout=20, follow_redirects=True) as client:
+        response = client.get(entry["url"])
+    response.raise_for_status()
+    if entry.get("ext") == "json3":
+        cues = []
+        for event in response.json().get("events") or []:
+            text = "".join(seg.get("utf8", "") for seg in event.get("segs") or []).strip()
+            if text and "tStartMs" in event:
+                cues.append((event["tStartMs"], event["tStartMs"] + (event.get("dDurationMs") or 2000), text))
+        return cues
+    cues = []
+    for block in re.split(r"\n\s*\n", response.text.replace("\r", "")):
+        match = re.search(r"(\d+):(\d+):(\d+)[.,](\d+)\s*-->\s*(\d+):(\d+):(\d+)[.,](\d+)", block)
+        if not match:
+            continue
+        v = [int(x) for x in match.groups()]
+        text = re.sub(r"<[^>]+>", "", block[match.end():]).strip()
+        if text:
+            cues.append(((v[0] * 3600 + v[1] * 60 + v[2]) * 1000 + v[3],
+                         (v[4] * 3600 + v[5] * 60 + v[6]) * 1000 + v[7], text))
+    return cues
+
+
+def _attach_subtitles(job: dict, output: Path, ffmpeg: Path | None) -> Path:
+    """Fetch the chosen subtitle, shift it to the trimmed range, then embed it or keep an .srt."""
+    meta = job.get("meta") or {}
+    lang, mode = meta.get("subs"), meta.get("subs_mode") or "embed"
+    if not lang or not ffmpeg:
+        return output
+    job["stage"] = "processing"
+    try:
+        entry = _subtitle_entry(_extract_info(meta["url"], None), lang, bool(meta.get("subs_auto")))
+        if not entry:
+            raise RuntimeError("missing subtitle")
+        offset = int(float(meta.get("start") or 0) * 1000)
+        limit = int(float(meta.get("end") or 0) * 1000) or None
+        lines, index = [], 0
+        for start, end, text in _subtitle_cues(entry):
+            if end <= offset or (limit and start >= limit):
+                continue
+            index += 1
+            start, end = max(0, start - offset), (min(end, limit) if limit else end) - offset
+            lines += [str(index), f"{_srt_time(start)} --> {_srt_time(end)}", text, ""]
+        if not lines:
+            raise RuntimeError("empty subtitle")
+        srt = output.with_suffix(f".{lang}.srt")
+        srt.write_text("\n".join(lines), encoding="utf-8")
+        if mode == "srt" or output.suffix != ".mp4":
+            job["extra_files"] = [str(srt)]
+            return output
+        embedded = output.with_name("subbed.mp4")
+        result = subprocess.run([str(ffmpeg), "-nostdin", "-hide_banner", "-y", "-i", str(output), "-i", str(srt),
+                                 "-map", "0", "-map", "1", "-c", "copy", "-c:s", "mov_text",
+                                 "-metadata:s:s:0", f"language={lang[:3]}", "-movflags", "+faststart",
+                                 str(embedded)], capture_output=True,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if result.returncode or not embedded.exists():
+            raise RuntimeError("embed failed")
+        output.unlink(missing_ok=True)
+        srt.unlink(missing_ok=True)
+        return embedded
+    except Exception as exc:  # noqa: BLE001 - the video itself is still fine
+        _log(f"Subtitle step failed: {type(exc).__name__}: {str(exc)[:120]}")
+        job["warning"] = "A felirat nem került bele (a videó elkészült)."
+        return output
+
+
+def _auto_save(job_id: str, job: dict, ffmpeg: Path | None) -> None:
+    folder = Path(_app_settings()["download_dir"])
+    source = Path(job["path"])
+    target = media_library.move_into(source, folder, job["filename"])
+    for extra in job.get("extra_files") or []:
+        extra_path = Path(extra)
+        if extra_path.exists():
+            media_library.move_into(extra_path, folder, target.stem + "".join(extra_path.suffixes[-2:]))
+    item = _library.add(str(target), job.get("meta") or {}, ffmpeg, _thumbnail_bytes(job))
+    job.update({"path": str(target), "saved_path": str(target), "library_id": item["id"]})
+    shutil.rmtree(job["dir"], ignore_errors=True)
+
+
+def _thumbnail_bytes(job: dict) -> bytes | None:
+    """Audio files have no frame to grab; keep the source artwork instead."""
+    thumb = (job.get("meta") or {}).get("thumbnail")
+    if job.get("format") != "mp3" or not thumb or not is_http_url(thumb):
+        return None
+    try:
+        with httpx.Client(timeout=10, follow_redirects=True) as client:
+            response = client.get(thumb)
+        if response.status_code == 200 and response.headers.get("content-type", "").startswith("image/"):
+            return response.content
+    except httpx.HTTPError:
+        pass
+    return None
+
+
 def _friendly_error(msg: str, url: str) -> str:
     """Nyers yt-dlp hibából érthető magyar üzenet."""
     m = msg.lower()
@@ -1587,16 +1903,13 @@ def _friendly_error(msg: str, url: str) -> str:
     return "Nem sikerült a letöltés. Próbáld újra, vagy válassz másik minőséget."
 
 
-@app.post("/api/prepare")
-async def api_prepare(
-    url: str = Query(...),
-    format: str = "mp4",
-    quality: str = "",
-    start: float = 0.0,
-    end: float = 0.0,
-    browser: str = "",
-    source: str = "any",
-):
+_LANG_RE = re.compile(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8}){0,2}")
+
+
+async def start_download(url: str, format: str = "mp4", quality: str = "", start: float = 0.0, end: float = 0.0,
+                         browser: str = "", source: str = "any", audio_lang: str = "", subs: str = "",
+                         subs_auto: bool = False, subs_mode: str = "embed", auto_save: bool | None = None,
+                         origin: str = "app") -> dict:
     validate_source_url(url, source)
     if format not in ("mp3", "mp4"):
         raise HTTPException(400, "Érvénytelen formátum.")
@@ -1604,6 +1917,11 @@ async def api_prepare(
         raise HTTPException(400, "Érvénytelen minőség.")
     if not all(math.isfinite(v) and v >= 0 for v in (start, end)) or (end and end <= start):
         raise HTTPException(400, "Érvénytelen vágási tartomány.")
+    for value in (audio_lang, subs):
+        if value and not _LANG_RE.fullmatch(value):
+            raise HTTPException(400, "Érvénytelen nyelvkód.")
+    if subs_mode not in ("embed", "srt"):
+        raise HTTPException(400, "Érvénytelen feliratmód.")
 
     is_ig = is_valid_instagram_url(url)
     try:
@@ -1636,7 +1954,9 @@ async def api_prepare(
     source = _source_for_url(url)
     job_id = os.urandom(8).hex()
     job_dir = Path(tempfile.mkdtemp(dir=TMP_DIR))
-    import time as _t
+    if auto_save is None:
+        auto_save = _app_settings()["save_mode"] == "auto"
+    trimmed = bool(s > 0.01 or (e and duration and e < duration - 0.05))
     job = {
         "status": "running",
         "stage": "starting",
@@ -1649,7 +1969,10 @@ async def api_prepare(
         "dir": str(job_dir),
         "path": None,
         "error": None,
-        "created": _t.time(),
+        "created": time.time(),
+        "auto_save": bool(auto_save),
+        "origin": origin,
+        "kind": "download",
         # a folyamatok menühöz / visszahozáshoz:
         "meta": {
             "title": info.get("title") or "video",
@@ -1657,13 +1980,18 @@ async def api_prepare(
             "source": source,
             "thumbnail": best_thumbnail(info),
             "quality": quality,
-            "start": s,
-            "end": e,
+            "start": s if trimmed else 0,
+            "end": e if trimmed else 0,
             "duration": duration,
+            "audio_lang": audio_lang,
+            "subs": subs,
+            "subs_auto": subs_auto,
+            "subs_mode": subs_mode,
         },
     }
 
-    opts = _build_opts(job_id, download_url, job_dir, format, quality, start, end, duration, browser or None)
+    opts = _build_opts(job_id, download_url, job_dir, format, quality, start, end, duration, browser or None,
+                       audio_lang or None)
     with _job_admission:
         if _updater.status()["state"] == "restarting":
             shutil.rmtree(job_dir, ignore_errors=True)
@@ -1671,6 +1999,24 @@ async def api_prepare(
         _jobs[job_id] = job
         _download_pool.submit(_run_job, job_id, download_url, format, opts, ext, est_bytes)
     return {"job_id": job_id, "filename": job["filename"]}
+
+
+@app.post("/api/prepare")
+async def api_prepare(
+    url: str = Query(...),
+    format: str = "mp4",
+    quality: str = "",
+    start: float = 0.0,
+    end: float = 0.0,
+    browser: str = "",
+    source: str = "any",
+    audio_lang: str = "",
+    subs: str = "",
+    subs_auto: bool = False,
+    subs_mode: str = "embed",
+):
+    return await start_download(url, format, quality, start, end, browser, source, audio_lang, subs,
+                                subs_auto, subs_mode)
 
 
 @app.get("/api/progress/{job_id}")
@@ -1724,6 +2070,11 @@ async def api_jobs():
             "format": job.get("format"),
             "error": job.get("error"),
             "eta": job.get("eta"),
+            "saved": job.get("saved_path"),
+            "libraryId": job.get("library_id"),
+            "warning": job.get("warning"),
+            "kind": job.get("kind", "download"),
+            "origin": job.get("origin", "app"),
         })
     return {"jobs": out}
 
@@ -1777,6 +2128,510 @@ async def api_file(job_id: str):
 # ----------------------------------------------------------------------------
 # Frontend kiszolgálása (utolsóként, hogy az /api útvonalak elsőbbséget kapjanak)
 # ----------------------------------------------------------------------------
+
+# ----------------------------------------------------------------------------
+# Helyi védelem: csak a saját ablak hívhat állapotváltoztató végpontokat
+# ----------------------------------------------------------------------------
+
+@app.middleware("http")
+async def _local_guard(request: Request, call_next):
+    host = (request.headers.get("host") or "").rsplit(":", 1)[0].strip("[]")
+    if host not in ("127.0.0.1", "localhost", "::1", "testserver"):
+        return Response("Forbidden host", status_code=403)  # DNS rebinding
+    path = request.url.path
+    if (request.method not in ("GET", "HEAD", "OPTIONS") and path.startswith("/api/")
+            and request.headers.get("x-downloader") != "1"):
+        return Response("Missing client header", status_code=403)  # cross-site form posts
+    return await call_next(request)
+
+
+# ----------------------------------------------------------------------------
+# Alkalmazás-beállítások
+# ----------------------------------------------------------------------------
+
+_settings_lock = threading.Lock()
+_DEFAULTS = {
+    "save_mode": "auto",            # auto: a letöltési mappába; ask: Mentés másként
+    "download_dir": str(Path.home() / "Downloads" / "Downloader"),
+    "mcp_mode": "ask",              # off | ask | full
+    "default_format": "mp4",
+    "default_quality": "1080",
+    "animations": "high",           # high | low | off
+    "background": "",               # egyéni háttér fájlneve
+    "background_kind": "",          # image | video
+    "background_dim": 55,
+}
+
+
+def _app_settings() -> dict:
+    stored = _load_settings()
+    merged = {**_DEFAULTS, **{k: stored[k] for k in _DEFAULTS if k in stored}}
+    if merged["mcp_mode"] not in ("off", "ask", "full"):
+        merged["mcp_mode"] = "ask"
+    return merged
+
+
+def _update_settings(changes: dict) -> dict:
+    with _settings_lock:
+        stored = _load_settings()
+        for key, value in changes.items():
+            if key not in _DEFAULTS or key in ("background", "background_kind"):
+                continue
+            if key == "save_mode" and value not in ("auto", "ask"):
+                continue
+            if key == "mcp_mode" and value not in ("off", "ask", "full"):
+                continue
+            if key == "animations" and value not in ("high", "low", "off"):
+                continue
+            if key == "download_dir":
+                value = str(value).strip()
+                if not value or not Path(value).is_absolute():
+                    continue
+            if key == "background_dim":
+                value = max(0, min(90, int(value)))
+            stored[key] = value
+        _save_settings(stored)
+    return _app_settings()
+
+
+def _mcp_token() -> str:
+    with _settings_lock:
+        stored = _load_settings()
+        if not stored.get("mcp_token"):
+            stored["mcp_token"] = base64.urlsafe_b64encode(os.urandom(24)).decode().rstrip("=")
+            _save_settings(stored)
+        return stored["mcp_token"]
+
+
+@app.get("/api/settings")
+async def api_settings():
+    return _app_settings()
+
+
+@app.post("/api/settings")
+async def api_settings_update(request: Request):
+    changes = await request.json()
+    if not isinstance(changes, dict):
+        raise HTTPException(400, "Érvénytelen beállítás.")
+    return await asyncio.to_thread(_update_settings, changes)
+
+
+@app.get("/api/mcp/config")
+async def api_mcp_config():
+    executable = sys.executable if getattr(sys, "frozen", False) else str(Path(sys.executable))
+    args = ["--mcp"] if getattr(sys, "frozen", False) else [str(Path(__file__).resolve()), "--mcp"]
+    url = json.loads(SERVER_FILE.read_text(encoding="utf-8"))["url"] if SERVER_FILE.exists() else ""
+    return {"command": executable, "args": args, "url": url + "/mcp" if url else "", "token": _mcp_token(),
+            "mode": _app_settings()["mcp_mode"], "log": _approvals.log[:20]}
+
+
+@app.post("/api/mcp/token/reset")
+async def api_mcp_token_reset():
+    with _settings_lock:
+        stored = _load_settings()
+        stored.pop("mcp_token", None)
+        _save_settings(stored)
+    token = _mcp_token()
+    _write_server_file()
+    return {"token": token}
+
+
+@app.post("/api/mcp/approve/{approval_id}")
+async def api_mcp_approve(approval_id: str, allow: bool = False):
+    return {"ok": _approvals.answer(approval_id, allow)}
+
+
+@app.get("/api/pulse")
+async def api_pulse():
+    """Cheap poll for the UI: background jobs (e.g. started by AI) and pending approvals."""
+    active = sum(1 for job in _jobs.values() if job["status"] in ("running", "starting", "canceling"))
+    return {"active": active, "jobs": len(_jobs), "approvals": _approvals.listing(), "library": _library.rev}
+
+
+# ----------------------------------------------------------------------------
+# Letöltési galéria
+# ----------------------------------------------------------------------------
+
+def _public_item(item: dict) -> dict:
+    return {**item, "hasThumb": _library.thumb_path(item["id"]) is not None,
+            "folder": str(Path(item["path"]).parent), "file": Path(item["path"]).name}
+
+
+@app.get("/api/library")
+async def api_library():
+    items = await asyncio.to_thread(_library.items)
+    return {"items": [_public_item(x) for x in items], "rev": _library.rev,
+            "folder": _app_settings()["download_dir"]}
+
+
+def _library_item(item_id: str) -> dict:
+    item = _library.get(item_id)
+    if not item:
+        raise HTTPException(404, "A fájl már nem található.")
+    return item
+
+
+@app.get("/api/library/{item_id}/file")
+async def api_library_file(item_id: str):
+    item = _library_item(item_id)
+    media_type = "audio/mpeg" if item["format"] == "mp3" else "video/mp4"
+    return FileResponse(item["path"], media_type=media_type, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/library/{item_id}/thumb")
+async def api_library_thumb(item_id: str):
+    path = _library.thumb_path(item_id)
+    if not path:
+        raise HTTPException(404, "Nincs bélyegkép.")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "max-age=3600"})
+
+
+@app.post("/api/library/delete")
+async def api_library_delete(request: Request):
+    ids = (await request.json()).get("ids") or []
+    removed = await asyncio.to_thread(_library.remove, [str(x) for x in ids][:500])
+    return {"removed": removed}
+
+
+@app.post("/api/library/{item_id}/reveal")
+async def api_library_reveal(item_id: str):
+    media_library.reveal(_library_item(item_id)["path"])
+    return {"ok": True}
+
+
+@app.post("/api/library/{item_id}/open")
+async def api_library_open(item_id: str):
+    media_library.open_file(_library_item(item_id)["path"])
+    return {"ok": True}
+
+
+@app.post("/api/library/{item_id}/rename")
+async def api_library_rename(item_id: str, request: Request):
+    title = str((await request.json()).get("title") or "")
+    try:
+        item = await asyncio.to_thread(_library.rename, item_id, title)
+    except OSError as exc:
+        raise HTTPException(409, "Ilyen nevű fájl már létezik, vagy a fájl használatban van.") from exc
+    if not item:
+        raise HTTPException(400, "Érvénytelen név.")
+    return _public_item(item)
+
+
+@app.post("/api/library/folder/open")
+async def api_library_folder_open():
+    folder = Path(_app_settings()["download_dir"])
+    folder.mkdir(parents=True, exist_ok=True)
+    media_library.open_file(str(folder))
+    return {"ok": True}
+
+
+def _run_edit_job(job_id: str, item: dict, start: float, end: float, height: int, fmt: str, replace: bool):
+    job = _jobs[job_id]
+    try:
+        ffmpeg = _ensure_ffmpeg_on_path()
+        if not ffmpeg:
+            raise RuntimeError("ffmpeg is not installed")
+        source = Path(item["path"])
+        ext = "mp3" if fmt == "mp3" else "mp4"
+        output = Path(job["dir"]) / f"edit.{ext}"
+        length = (end - start) if end > start else max(0.0, (item.get("duration") or 0) - start)
+        command = [str(ffmpeg), "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-progress", "pipe:1"]
+        if start > 0:
+            command += ["-ss", f"{start:.3f}"]
+        command += ["-i", str(source)]
+        if end > start:
+            command += ["-t", f"{end - start:.3f}"]
+        if ext == "mp3":
+            command += ["-vn", "-c:a", "libmp3lame", "-b:a", "192k"]
+        else:
+            command += ["-map", "0:v:0?", "-map", "0:a:0?", "-map", "0:s?", "-c:s", "mov_text",
+                        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+                        "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart"]
+            if height:
+                command += ["-vf", f"scale=-2:{int(height)}"]
+        command.append(str(output))
+        job["stage"] = "processing"
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        for line in process.stdout:
+            if job.get("status") == "canceling":
+                process.kill()
+                raise _Cancelled()
+            if line.startswith("out_time_ms=") and length:
+                try:
+                    done = int(line.split("=", 1)[1]) / 1_000_000
+                    job["progress"] = max(job["progress"], min(98.0, done / length * 100))
+                except ValueError:
+                    pass
+        stderr = process.stderr.read()
+        if process.wait() or not output.exists():
+            raise RuntimeError("ffmpeg: " + stderr[-300:])
+        meta = {**item, "title": item["title"] if replace else f"{item['title']} (szerkesztett)",
+                "start": 0, "end": 0, "duration": length or item.get("duration")}
+        if replace:
+            if not media_library.recycle(str(source)):
+                raise RuntimeError("Az eredeti fájl nem törölhető (használatban van?).")
+            target = media_library.move_into(output, source.parent, source.stem + "." + ext)
+            _library.remove([item["id"]], delete_files=False)
+        else:
+            target = media_library.move_into(output, source.parent, sanitize_filename(meta["title"]) + "." + ext)
+        thumb = _library.thumb_path(item["id"])
+        new_item = _library.add(str(target), meta, ffmpeg,
+                                thumb.read_bytes() if thumb and ext == "mp3" else None)
+        job.update({"path": str(target), "saved_path": str(target), "library_id": new_item["id"],
+                    "progress": 100.0, "stage": "done", "status": "done"})
+    except _Cancelled:
+        job.update({"status": "canceled", "stage": "canceled"})
+    except Exception as exc:  # noqa: BLE001
+        _log(f"Edit failed: {exc}")
+        job.update({"status": "error", "error": "A szerkesztés nem sikerült: " + str(exc)[:160]})
+    finally:
+        shutil.rmtree(job["dir"], ignore_errors=True)
+
+
+def start_edit(item_id: str, start: float = 0, end: float = 0, height: int = 0, fmt: str = "",
+               replace: bool = False, origin: str = "app") -> dict:
+    item = _library_item(item_id)
+    fmt = fmt or ("mp3" if item["format"] == "mp3" else "mp4")
+    if fmt not in ("mp3", "mp4") or not all(math.isfinite(v) and v >= 0 for v in (start, end)) \
+            or (end and end <= start) or not 0 <= int(height or 0) <= 4320:
+        raise HTTPException(400, "Érvénytelen szerkesztési beállítás.")
+    job_id = os.urandom(8).hex()
+    job = {"status": "running", "stage": "processing", "progress": 0.0, "speed": 0, "eta": None,
+           "filename": Path(item["path"]).stem + "." + fmt, "ext": fmt, "format": fmt,
+           "dir": tempfile.mkdtemp(dir=TMP_DIR), "path": None, "error": None, "created": time.time(),
+           "kind": "edit", "origin": origin, "auto_save": True,
+           "meta": {"title": item["title"], "url": item.get("url"), "source": item.get("source"),
+                    "thumbnail": item.get("thumbnail"), "quality": str(height or ""), "start": start, "end": end,
+                    "duration": item.get("duration")}}
+    _jobs[job_id] = job
+    _download_pool.submit(_run_edit_job, job_id, item, float(start), float(end), int(height or 0), fmt, replace)
+    return {"job_id": job_id}
+
+
+@app.post("/api/library/{item_id}/edit")
+async def api_library_edit(item_id: str, request: Request):
+    body = await request.json()
+    return start_edit(item_id, float(body.get("start") or 0), float(body.get("end") or 0),
+                      int(body.get("height") or 0), str(body.get("format") or ""), bool(body.get("replace")))
+
+
+# ----------------------------------------------------------------------------
+# Egyéni háttér (kép vagy videó)
+# ----------------------------------------------------------------------------
+
+_BACKGROUND_TYPES = {".jpg": "image", ".jpeg": "image", ".png": "image", ".webp": "image", ".gif": "image",
+                     ".mp4": "video", ".webm": "video", ".mov": "video", ".m4v": "video"}
+
+
+def set_custom_background(path: str) -> dict:
+    source = Path(path)
+    kind = _BACKGROUND_TYPES.get(source.suffix.lower())
+    if not kind or not source.is_file() or source.stat().st_size > 400 * 1024 * 1024:
+        raise ValueError("Csak kép (jpg, png, webp, gif) vagy videó (mp4, webm, mov) lehet, legfeljebb 400 MB.")
+    BACKGROUND_DIR.mkdir(parents=True, exist_ok=True)
+    for old in BACKGROUND_DIR.iterdir():
+        old.unlink(missing_ok=True)
+    target = BACKGROUND_DIR / ("background" + source.suffix.lower())
+    shutil.copyfile(source, target)
+    with _settings_lock:
+        stored = _load_settings()
+        stored.update({"background": target.name, "background_kind": kind, "theme": "custom"})
+        _save_settings(stored)
+    return _app_settings()
+
+
+@app.get("/api/background")
+async def api_background():
+    name = _app_settings()["background"]
+    path = BACKGROUND_DIR / name if name else None
+    if not path or not path.is_file():
+        raise HTTPException(404, "Nincs egyéni háttér.")
+    return FileResponse(path, headers={"Cache-Control": "no-store"})
+
+
+# ----------------------------------------------------------------------------
+# MCP: az AI-asszisztensek eszközei (tömör, kevés tokenes kimenet)
+# ----------------------------------------------------------------------------
+
+def _size(n: float) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f}{unit}" if unit in ("B", "KB") else f"{n:.1f}{unit}"
+        n /= 1024
+    return ""
+
+
+def _clean(value) -> str:
+    return str(value or "").replace("|", "/").replace("\n", " ").strip()
+
+
+async def _mcp_search(args: dict) -> str:
+    page = args.get("page") or None
+    if args.get("channel"):
+        data = await youtube_channel(str(args["channel"]), "shorts" if args.get("type") == "short" else "videos", page)
+        items, head = data["items"], ""
+        if data.get("channel"):
+            c = data["channel"]
+            head = f"channel {_clean(c['title'])} {c.get('handle', '')} {' '.join(c.get('stats', []))}\n"
+    else:
+        query = str(args.get("q") or "").strip()
+        if not query and not page:
+            raise ValueError("q or channel is required")
+        data = await youtube_search(query, page, args.get("type") == "channel")
+        kind = args.get("type")
+        if kind == "channel":
+            lines = [f"{c['id']}|{_clean(c['title'])}|{c.get('handle', '')}|{_clean(c.get('subs'))}"
+                     for c in data["channels"]]
+            return "\n".join(lines) or "no channels"
+        items = data["shorts"] if kind == "short" else data["videos"] + ([] if kind else data["shorts"])
+        head = ""
+    lines = [f"{x['url']}|{_clean(x['title'])}|{_clean(x.get('uploader'))}|{x.get('length', '')}|{_clean(x.get('views'))}"
+             for x in items]
+    if data.get("next"):
+        lines.append(f"page={data['next']}")
+    return head + ("\n".join(lines) or "no results")
+
+
+async def _mcp_info(args: dict) -> str:
+    url = str(args.get("url") or "")
+    validate_source_url(url)
+    info = await get_info(url, "auto" if is_valid_instagram_url(url) else None)
+    heights = sorted({f["height"] for f in info.get("formats", []) if f.get("height") and _has_codec(f, "v")},
+                     reverse=True)
+    subs = _subtitle_listing(info)
+    parts = [f"title: {_clean(info.get('title'))}", f"channel: {_clean(info.get('uploader') or info.get('channel'))}",
+             f"duration: {int(info.get('duration') or 0)}s", f"heights: {','.join(map(str, heights)) or '-'}"]
+    tracks = _audio_tracks(info)
+    if tracks:
+        parts.append("audio: " + ",".join(t["lang"] + ("*" if t["original"] else "") for t in tracks))
+    if subs["subtitles"]:
+        parts.append("subs: " + ",".join(s["lang"] for s in subs["subtitles"]))
+    if subs["captionsOrig"]:
+        parts.append(f"auto subs: {subs['captionsOrig']} (+translations)")
+    return "\n".join(parts)
+
+
+async def _mcp_wait(job_id: str, timeout: float = 1800) -> str:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        job = _jobs.get(job_id)
+        if not job:
+            return f"job {job_id} gone"
+        if job["status"] in ("done", "error", "canceled"):
+            return _job_line(job_id, job)
+        await asyncio.sleep(0.5)
+    return f"job {job_id} still running; check jobs"
+
+
+def _job_line(job_id: str, job: dict) -> str:
+    meta = job.get("meta") or {}
+    status = job["status"] if job["status"] != "running" else f"running {job['progress']:.0f}%"
+    extra = f"|lib={job['library_id']}|{job.get('saved_path')}" if job.get("library_id") else ""
+    error = f"|{job['error']}" if job.get("error") else ""
+    return f"{job_id}|{job.get('kind', 'download')}|{status}|{_clean(meta.get('title'))}{extra}{error}"
+
+
+async def _mcp_download(args: dict) -> str:
+    quality = args.get("quality")
+    sub = str(args.get("subs") or "")
+    info = None
+    subs_auto = False
+    if sub:
+        info = await get_info(str(args["url"]))
+        listing = _subtitle_listing(info)
+        subs_auto = sub not in {s["lang"] for s in listing["subtitles"]}
+    result = await start_download(
+        str(args["url"]), str(args.get("format") or "mp4"), str(int(quality)) if quality else "",
+        float(args.get("start") or 0), float(args.get("end") or 0), audio_lang=str(args.get("audio_lang") or ""),
+        subs=sub, subs_auto=subs_auto, subs_mode=str(args.get("subs_mode") or "embed"), auto_save=True,
+        origin="ai")
+    if args.get("wait"):
+        return await _mcp_wait(result["job_id"])
+    return f"started job {result['job_id']} ({result['filename']}); poll with jobs"
+
+
+async def _mcp_jobs(_args: dict) -> str:
+    lines = [_job_line(jid, job) for jid, job in sorted(_jobs.items(), key=lambda kv: -kv[1].get("created", 0))[:20]]
+    return "\n".join(lines) or "no jobs"
+
+
+async def _mcp_cancel(args: dict) -> str:
+    await api_cancel(str(args["id"]))
+    return "canceling"
+
+
+async def _mcp_library(args: dict) -> str:
+    query = str(args.get("q") or "").casefold()
+    limit = max(1, min(200, int(args.get("limit") or 25)))
+    items = [x for x in await asyncio.to_thread(_library.items) if not query or query in x["title"].casefold()]
+    lines = [f"{x['id']}|{_clean(x['title'])}|{x['format']}|{_size(x.get('size') or 0)}|"
+             f"{_fmt_clock(x.get('duration') or 0)}|{x['path']}" for x in items[:limit]]
+    more = f"\n(+{len(items) - limit} more)" if len(items) > limit else ""
+    return ("\n".join(lines) or "library empty") + more
+
+
+async def _mcp_edit(args: dict) -> str:
+    result = start_edit(str(args["id"]), float(args.get("start") or 0), float(args.get("end") or 0),
+                        int(args.get("height") or 0), str(args.get("format") or ""), bool(args.get("replace")),
+                        origin="ai")
+    if args.get("wait"):
+        return await _mcp_wait(result["job_id"])
+    return f"started job {result['job_id']}"
+
+
+async def _mcp_delete(args: dict) -> str:
+    ids = [str(x) for x in args.get("ids") or []]
+    removed = await asyncio.to_thread(_library.remove, ids)
+    return f"moved to Recycle Bin: {len(removed)}/{len(ids)}"
+
+
+async def _mcp_open(args: dict) -> str:
+    item = _library_item(str(args["id"]))
+    (media_library.reveal if args.get("how") == "folder" else media_library.open_file)(item["path"])
+    return "opened"
+
+
+async def _mcp_describe(tool: str, args: dict) -> str:
+    """Human-readable line for the approval dialog."""
+    if tool == "download":
+        cut = f", {args.get('start', 0)}–{args.get('end') or 'vége'} mp" if args.get("start") or args.get("end") else ""
+        quality = f" {int(args['quality'])}{'k' if args.get('format') == 'mp3' else 'p'}" if args.get("quality") else ""
+        title = ""
+        try:
+            info = await asyncio.wait_for(get_info(str(args.get("url"))), 20)
+            title = f"„{info.get('title')}” "
+        except Exception:  # noqa: BLE001
+            pass
+        return f"Letöltés: {title}{args.get('url')} → {str(args.get('format') or 'mp4').upper()}{quality}{cut}"
+    if tool in ("delete", "edit", "open"):
+        ids = args.get("ids") or [args.get("id")]
+        names = [(_library.get(str(i)) or {}).get("title") or str(i) for i in ids]
+        label = {"delete": "Törlés (Lomtárba)", "edit": "Szerkesztés", "open": "Megnyitás"}[tool]
+        detail = ""
+        if tool == "edit":
+            detail = " · " + ", ".join(f"{k}={args[k]}" for k in ("start", "end", "height", "format", "replace")
+                                        if args.get(k) not in (None, "", 0, False))
+        return f"{label}: " + ", ".join(names[:6]) + (f" és még {len(names) - 6}" if len(names) > 6 else "") + detail
+    return tool
+
+
+_mcp_router, _approvals = mcp_server.create_router(
+    {"search": _mcp_search, "info": _mcp_info, "download": _mcp_download, "jobs": _mcp_jobs,
+     "cancel": _mcp_cancel, "library": _mcp_library, "edit": _mcp_edit, "delete": _mcp_delete,
+     "open": _mcp_open},
+    _mcp_describe, lambda: _app_settings()["mcp_mode"], _mcp_token, APP_VERSION)
+app.include_router(_mcp_router)
+
+
+def _write_server_file(url: str | None = None) -> None:
+    try:
+        if url is None:
+            url = json.loads(SERVER_FILE.read_text(encoding="utf-8"))["url"]
+        SERVER_FILE.write_text(json.dumps({"url": url, "token": _mcp_token(), "pid": os.getpid()}), encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"server file write failed: {exc}")
+
 
 @app.get("/api/version")
 async def api_version():
@@ -2194,6 +3049,7 @@ def _open_main_app_in_window(window) -> bool:
     url = _start_local_server(int(os.environ.get("PORT", "7860")))
     if not url:
         return False
+    _write_server_file(url)
     try:
         if hasattr(window, "resize"):
             window.resize(1180, 820)
@@ -2219,45 +3075,31 @@ class _NativeApi:
         self._theme_lock = threading.Lock()
         self._theme_icon = None
 
-    def set_window(self, w):
+    def set_window(self, w, native_frame: bool = False):
         self._window = w
         self._maximized = False
-        w.events.shown += self._round_window
-        w.events.resized += self._round_window
+        self._frame = None
+        self._native_frame = native_frame
+        w.events.shown += self._on_shown
 
-    def _round_window(self, *args):
+    def _on_shown(self, *args):
         if os.name != "nt" or not self._window:
             return
         try:
             import ctypes
             handle = int(self._window.native.Handle.ToInt64())
-            preference = ctypes.c_int(2)
+            preference = ctypes.c_int(2)  # DWMWCP_ROUND: Windows 11 rounded corners and shadow
             ctypes.windll.dwmapi.DwmSetWindowAttribute(
                 ctypes.c_void_p(handle), 33, ctypes.byref(preference), 4)
-            from System import Action
-            from System.Drawing import Region
-            from System.Drawing.Drawing2D import GraphicsPath
-            def apply_region():
-                form = self._window.native
-                old = form.Region
-                if self._maximized:
-                    form.Region = None
-                else:
-                    width, height = form.Width, form.Height
-                    path = GraphicsPath()
-                    diameter = 22
-                    path.AddArc(0, 0, diameter, diameter, 180, 90)
-                    path.AddArc(width-diameter, 0, diameter, diameter, 270, 90)
-                    path.AddArc(width-diameter, height-diameter, diameter, diameter, 0, 90)
-                    path.AddArc(0, height-diameter, diameter, diameter, 90, 90)
-                    path.CloseFigure()
-                    form.Region = Region(path)
-                    path.Dispose()
-                if old:
-                    old.Dispose()
-            self._window.native.Invoke(Action(apply_region))
+            if self._native_frame:
+                from System import Action
+                import native_window
+
+                def install():
+                    self._frame = native_window.NativeFrame(handle)
+                self._window.native.Invoke(Action(install))
         except Exception as exc:
-            _log(f"Window corner styling unavailable: {exc}")
+            _log(f"Native window styling unavailable: {exc}")
 
     def clipboard_text(self) -> str:
         if os.name != "nt" or not self._window:
@@ -2266,13 +3108,27 @@ class _NativeApi:
         from System.Windows.Forms import Clipboard
         return str(self._window.native.Invoke(Func[String](lambda: Clipboard.GetText())))
 
+    def _on_ui(self, func):
+        from System import Action
+        self._window.native.Invoke(Action(func))
+
+    def begin_drag(self, kind: str = "caption"):
+        """Hand the pressed mouse to Windows: native move (Aero Snap) or edge resize."""
+        if self._frame and isinstance(kind, str):
+            self._on_ui(lambda: self._frame.begin(kind))
+
     def window_action(self, action: str):
         if not self._window:
             return
         if action == "minimize":
-            self._window.minimize()
+            if self._frame:
+                self._on_ui(self._frame.minimize)
+            else:
+                self._window.minimize()
         elif action == "maximize":
-            if self._maximized:
+            if self._frame:
+                self._on_ui(self._frame.toggle_maximize)
+            elif self._maximized:
                 self._maximized = False
                 self._window.restore()
             else:
@@ -2280,11 +3136,54 @@ class _NativeApi:
                 self._window.maximize()
         elif action == "close":
             self._window.destroy()
-        return {"maximized": self._maximized}
+        return self.window_state()
+
+    def window_state(self) -> dict:
+        return {"maximized": self._frame.maximized if self._frame else self._maximized,
+                "native": bool(self._frame)}
 
     def resize_window(self, width: int, height: int):
         if self._window and not self._maximized:
             self._window.resize(max(900, min(3840, int(width))), max(640, min(2160, int(height))))
+
+    def open_url(self, url: str) -> bool:
+        """Open YouTube pages (subscribe, channel) in the user's browser."""
+        if not isinstance(url, str) or not re.match(r"https://(www\.)?youtube\.com/", url):
+            return False
+        import webbrowser
+        return webbrowser.open(url)
+
+    def flash_window(self) -> None:
+        """Flash the taskbar button when an AI approval waits in the background."""
+        if os.name != "nt" or not self._window:
+            return
+        try:
+            import ctypes
+            ctypes.windll.user32.FlashWindow(ctypes.c_void_p(int(self._window.native.Handle.ToInt64())), True)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def pick_folder(self) -> str:
+        import webview
+        dialog = getattr(webview, "FileDialog", None)
+        result = self._window.create_file_dialog(dialog.FOLDER if dialog else webview.FOLDER_DIALOG,
+                                                 directory=_app_settings()["download_dir"])
+        if not result:
+            return ""
+        folder = result if isinstance(result, str) else result[0]
+        _update_settings({"download_dir": folder})
+        return folder
+
+    def pick_background(self) -> dict:
+        result = self._window.create_file_dialog(
+            self._open_dialog_type(),
+            file_types=("Képek és videók (*.jpg;*.jpeg;*.png;*.webp;*.gif;*.mp4;*.webm;*.mov;*.m4v)",))
+        if not result:
+            return {"ok": False}
+        try:
+            return {"ok": True, "settings": set_custom_background(result if isinstance(result, str) else result[0])}
+        except (OSError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
 
     def setup_state(self) -> dict:
         settings = _load_settings()
@@ -2312,7 +3211,7 @@ class _NativeApi:
     def set_theme_icon(self, theme: str) -> None:
         if os.name != "nt" or not self._window or not isinstance(theme, str) or theme not in _THEMES:
             return
-        icon_path = _app_icon_path(theme)
+        icon_path = _app_icon_path(_ICON_THEME.get(theme, theme))
         if not icon_path:
             return
         from System import Action
@@ -2345,7 +3244,8 @@ class _NativeApi:
 
     def finish_update(self) -> dict:
         with _job_admission:
-            if not any(job["status"] in {"running", "starting", "canceling", "done"}
+            if not any(job["status"] in {"running", "starting", "canceling"}
+                       or (job["status"] == "done" and not job.get("saved_path"))
                        for job in _jobs.copy().values()):
                 _updater.finish(self._window.destroy)
         return _updater.status()
@@ -2450,8 +3350,16 @@ class _NativeApi:
             dest = dest + "." + ext
         try:
             shutil.copyfile(src, dest)
+            for extra in job.get("extra_files") or []:
+                extra_path = Path(extra)
+                if extra_path.exists():
+                    shutil.copyfile(extra_path, Path(dest).with_suffix("".join(extra_path.suffixes[-2:])))
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "error": f"Mentés sikertelen: {e}"}
+        try:
+            _library.add(dest, job.get("meta") or {}, _ensure_ffmpeg_on_path(), _thumbnail_bytes(job))
+        except Exception as exc:  # noqa: BLE001 - the file is saved even if the gallery entry fails
+            _log(f"Library add failed: {exc}")
         # sikeres mentés után takarítunk
         shutil.rmtree(job["dir"], ignore_errors=True)
         _jobs.pop(job_id, None)
@@ -2480,7 +3388,7 @@ def main():
                 background_color="#0b0d12",
                 js_api=native,
             )
-            native.set_window(window)
+            native.set_window(window, native_frame=True)
             _start_webview(webview)
             return
         except Exception as e:  # noqa: BLE001
@@ -2496,6 +3404,7 @@ def main():
         )
         return
 
+    _write_server_file(url)
     print("=" * 52)
     print("  Downloader — YouTube + Instagram letöltő")
     print("=" * 52)
@@ -2517,7 +3426,7 @@ def main():
             shadow=True,
             js_api=native,
         )
-        native.set_window(window)
+        native.set_window(window, native_frame=True)
         _start_webview(webview)
     except Exception as e:  # noqa: BLE001
         # ha valamiért nincs natív motor, essünk vissza böngészőre, hogy ne haljon meg az app

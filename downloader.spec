@@ -35,6 +35,7 @@ hidden += collect_submodules("curl_cffi")
 hidden += [
     "ffmpeg_setup",             # a saját ffmpeg-letöltő modulunk
     "ig_api",                   # az Instagram guest-API kliensünk
+    "yt_web", "library", "native_window", "mcp_server", "mcp_bridge",
     "uvicorn.logging", "uvicorn.loops", "uvicorn.loops.auto",
     "uvicorn.protocols", "uvicorn.protocols.http", "uvicorn.protocols.http.auto",
     "uvicorn.protocols.http.h11_impl", "h11",
